@@ -1,6 +1,29 @@
 # GEIST Kafka Connector
 ## Usage
-See [GEIST core repo](https://github.com/zpiroux/geist).
+See [GEIST core repo](https://github.com/zpiroux/geist) for details.
+
+Install with:
+```sh
+go get github.com/zpiroux/geist-connector-kafka
+```
+Register connector prior to starting up Geist with (error handling omitted):
+```go
+import (
+	"github.com/zpiroux/geist"
+	"github.com/zpiroux/geist-connector-kafka/gkafka"
+)
+
+...
+geistConfig := geist.NewConfig()
+
+kafkaConfig := &gkafka.Config{ /* add config */ }
+
+err = geistConfig.RegisterExtractorType(gkafka.NewExtractorFactory(kafkaConfig))
+err = geistConfig.RegisterLoaderType(gkafka.NewLoaderFactory(kafkaConfig))
+
+g, err := geist.New(ctx, geistConfig)
+...
+```
 
 ## Limitations and improvement areas
 

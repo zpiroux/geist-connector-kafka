@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
 	"github.com/zpiroux/geist/entity"
-	"github.com/zpiroux/geist-connector-kafka/internal"
 )
 
 const entityTypeId = "kafka"
