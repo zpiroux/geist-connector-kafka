@@ -2,6 +2,7 @@ package gki
 
 import "github.com/confluentinc/confluent-kafka-go/kafka"
 
+// Producer interface is used to enable full unit testing
 type Producer interface {
 	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
 	Events() chan kafka.Event

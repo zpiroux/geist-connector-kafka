@@ -87,7 +87,6 @@ func (p MockProducer) Flush(timeoutMs int) int {
 
 func (p MockProducer) Close() {}
 
-
 var genericSourceToKafkaSinkSpec = []byte(`
 {
    "namespace": "geist",

@@ -34,10 +34,6 @@ There is an option in the Stream Spec to increase the sink throughput for a give
 
 The underlaying Kafka library ([librdkafka](https://github.com/edenhill/librdkafka)) did not have support for batch publish/delivery reports, that could improve this, when this connector was developed, but newer versions might have added this.
 
-### Kafka providers
-Secure access is enabled when using spec provider option `"confluent"`, where API key and secret are provided in `geist.Config.Kafka` when creating Geist with `geist.New()`.
-
-If using vanilla Kafka with spec option `"native"` it currently only supports plain access without authentication.
 
 ## Contact
 info @ zpiroux . com

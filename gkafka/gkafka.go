@@ -2,6 +2,7 @@ package gkafka
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
@@ -10,47 +11,79 @@ import (
 
 const entityTypeId = "kafka"
 
+// Kafka properties commonly used and for setting up default config.
+// See https://docs.confluent.io/platform/current/clients/librdkafka/html/md_CONFIGURATION.html
+// for all properties.
 const (
-	kafkaProviderConfluent = "confluent"
-	kafkaProviderNative    = "native"
+	// General
+	PropBootstrapServers = "bootstrap.servers"
+	PropSecurityProtocol = "security.protocol"
+	PropSASLMechanism    = "sasl.mechanism"
+	PropSASLUsername     = "sasl.username"
+	PropSASLPassword     = "sasl.password"
+
+	// Consumer
+	PropQueuedMaxMessagesKb = "queued.max.messages.kbytes"
+	PropMaxPollInterval     = "max.poll.interval.ms"
+
+	// Producer
+	PropIdempotence     = "enable.idempotence"
+	PropCompressionType = "compression.type"
 )
 
-// Config is the external config provided by the geist client to the factory when starting up,
-// which is to be used during stream creations.
+// Config is the external config provided by the geist client to the factory when
+// starting up, which is to be used during stream creations.
 type Config struct {
-	BootstrapServers         string // Default servers, can be overriden in GEIST specs
-	ConfluentBootstrapServer string // Default server, can be overriden in GEIST specs
-	ConfluentApiKey          string
-	ConfluentApiSecret       string `json:"-"`
-	PollTimeoutMs            int    // Default poll timeout, can be overridden in GEIST specs
-	QueuedMaxMessagesKb      int    // Events consumed and processed before commit
 
-	// Env is only required to be filled in if stream specs for this use of Geist are using different
-	// topic specs for different environments, typically "dev", "stage", and "prod".
-	// Any string is allowed as long as it matches the ones used in the stream specs.
+	// KafkaProps is used to provide standard Kafka Properties to producer/consumer
+	// entities. It should be filled in with required props such as "bootstrap.servers"
+	// but can also be filled in with default properties common for intended streams.
+	// All these properties can be overridden in each Stream Spec by using its
+	// config.properties JSON object.
+	KafkaProps map[string]any
+
+	// PollTimeoutMs is the default value to use as the consumer poll timeout for
+	// each Extractor's Kafka consumer. It can be overridden per stream in stream
+	// specs. If not set the default value gki.DefaultPollTimeoutMs will be used.
+	PollTimeoutMs int
+
+	// Env is only required to be filled in if stream specs for this use of Geist
+	// are using different topic specs for different environments, typically "dev",
+	// "stage", and "prod". Any string is allowed as long as it matches the ones
+	// used in the stream specs.
 	Env string
+
+	// CreateTopics specifies if the Extractor is allowed to create DLQ topics
+	// (if configured in stream specs), and Loader is allowed to create specified
+	// topics if they do not exists.
+	CreateTopics bool
 }
 
-// Convenience function for easy default config
-func (k Config) DefaultBootstrapServers(provider string) string {
-	if provider == kafkaProviderConfluent {
-		return k.ConfluentBootstrapServer
-	}
-	return k.BootstrapServers
-}
+const (
+	// increase from 5 min default to 10 min
+	DefaultMaxPollInterval = 600000
 
-// kafkaTopicCreationMutex reduces the amount of unneeded requests for certain stream setup operations.
-// If a stream is configured to operate with more than one concurrent instance (ops.streamsPerPod > 1),
-// certain operations might be attempted by more than one of its stream entity instances (e.g. a stream's
-// Kafka Extractors creating DLQ topics if requested in its spec).
-// The mutex scope is per pod, but this is good enough in this case.
+	// Maximum number of kilobytes per topic+partition in the local consumer queue.
+	// To not go OOM if big backlog, set this low. Default is 1 048 576 KB  = 1GB
+	// per partition! A few MBs seems to give good enough throughput while keeping
+	// memory requirements low.
+	DefaultQueuedMaxMessagesKb = 2048
+)
+
+// kafkaTopicCreationMutex reduces the amount of unneeded requests for certain stream
+// setup operations. If a stream is configured to operate with more than one concurrent
+// instance (ops.streamsPerPod > 1), certain operations might be attempted by more than
+// one of its stream entity instances (e.g. a stream's Kafka Extractors creating DLQ
+// topics if requested in its spec). The mutex scope is per pod, but this is good enough
+// in this case.
 var kafkaTopicCreationMutex sync.Mutex
 
 //
 // Extractor
 //
 
-// extractorFactory is a singleton enabling extractors/sources to be handled as plug-ins to Geist
+// extractorFactory is a singleton enabling extractors/sources to be handled as
+// plug-ins to Geist
 type extractorFactory struct {
 	config *Config
 }
@@ -76,32 +109,18 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec) *gki.C
 		ef.topicNamesFromSpec(spec.Source.Config.Topics),
 		&kafkaTopicCreationMutex)
 
-	// Deployment defaults
+	// Deployment defaults - will be overridden if set in external config or stream spec
 	props := gki.ConfigMap{
-		"bootstrap.servers":        ef.config.DefaultBootstrapServers(spec.Source.Config.Provider),
-		"enable.auto.commit":       true,
-		"enable.auto.offset.store": false,
-		"max.poll.interval.ms":     600000, // increase from 5 min default to 10 min
-
-		// Maximum number of kilobytes per topic+partition in the local consumer queue.
-		// To not go OOM if big backlog, set this low. Default is 1 048 576 KB  = 1GB per partition!
-		// A few MBs seems to give good enough throughput while keeping memory requirements low.
-		"queued.max.messages.kbytes": ef.config.QueuedMaxMessagesKb,
-
-		// Possibly add fetch.message.max.bytes as well. Default is 1 048 576.
-		// Initial maximum number of bytes per topic+partition to request when fetching messages from the broker.
-		// "fetch.message.max.bytes": 1048576,
+		PropMaxPollInterval:     DefaultMaxPollInterval,
+		PropQueuedMaxMessagesKb: DefaultQueuedMaxMessagesKb,
 	}
 
-	if spec.Source.Config.Provider == kafkaProviderConfluent {
-		props["bootstrap.servers"] = ef.config.ConfluentBootstrapServer
-		props["security.protocol"] = "SASL_SSL"
-		props["sasl.mechanisms"] = "PLAIN"
-		props["sasl.username"] = ef.config.ConfluentApiKey
-		props["sasl.password"] = ef.config.ConfluentApiSecret
+	// Add all props from provided external config (will override deployment defaults if set)
+	for k, v := range ef.config.KafkaProps {
+		props[k] = v
 	}
 
-	// Add all props from GEIST spec (could override deployment defaults)
+	// Add all props from GEIST stream spec (will override previously set ones)
 	for _, prop := range spec.Source.Config.Properties {
 		props[prop.Key] = prop.Value
 	}
@@ -113,6 +132,10 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec) *gki.C
 	} else {
 		c.SetPollTimout(ef.config.PollTimeoutMs)
 	}
+
+	// This is currently not possible to override in stream specs
+	c.SetCreateTopics(ef.config.CreateTopics)
+
 	return c
 }
 
@@ -154,16 +177,25 @@ func (lf *loaderFactory) SinkId() string {
 }
 
 func (lf *loaderFactory) NewLoader(ctx context.Context, spec *entity.Spec, id string) (entity.Loader, error) {
-	return gki.NewLoader(ctx, lf.createKafkaLoaderConfig(spec), id, nil)
+
+	config, err := lf.createKafkaLoaderConfig(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	return gki.NewLoader(ctx, config, id, nil)
 }
 
 func (lf *loaderFactory) NewSinkExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
 	return nil, nil
 }
 
-func (lf *loaderFactory) createKafkaLoaderConfig(spec *entity.Spec) *gki.Config {
+func (lf *loaderFactory) createKafkaLoaderConfig(spec *entity.Spec) (*gki.Config, error) {
 
 	var sync bool
+	if spec.Sink.Config == nil {
+		return nil, errors.New("no sink config provided")
+	}
 	if spec.Sink.Config.Synchronous != nil {
 		sync = *spec.Sink.Config.Synchronous
 	}
@@ -174,31 +206,28 @@ func (lf *loaderFactory) createKafkaLoaderConfig(spec *entity.Spec) *gki.Config 
 		&kafkaTopicCreationMutex,
 		sync)
 
-	// Deployment defaults
+	// Deployment defaults - will be overridden if set in external config or stream spec
 	props := gki.ConfigMap{
-		"bootstrap.servers":                     lf.config.DefaultBootstrapServers(spec.Sink.Config.Provider),
-		"enable.idempotence":                    true,
-		"acks":                                  "all",
-		"max.in.flight.requests.per.connection": 5,
-		"compression.type":                      "lz4",
-		"auto.offset.reset":                     "earliest",
+		PropIdempotence:     true,
+		PropCompressionType: "lz4",
 	}
 
-	if spec.Sink.Config.Provider == kafkaProviderConfluent {
-		props["bootstrap.servers"] = lf.config.ConfluentBootstrapServer
-		props["security.protocol"] = "SASL_SSL"
-		props["sasl.mechanisms"] = "PLAIN"
-		props["sasl.username"] = lf.config.ConfluentApiKey
-		props["sasl.password"] = lf.config.ConfluentApiSecret
+	// Add all props from provided external config (will override deployment defaults if set)
+	for k, v := range lf.config.KafkaProps {
+		props[k] = v
 	}
 
-	// Add all props from GEIST spec (could override deployment defaults)
+	// Add all props from GEIST spec (will override previously set ones)
 	for _, prop := range spec.Sink.Config.Properties {
 		props[prop.Key] = prop.Value
 	}
 
 	c.SetProps(props)
-	return c
+
+	// This is currently not possible to override in stream specs
+	c.SetCreateTopics(lf.config.CreateTopics)
+
+	return c, nil
 }
 
 func (s *loaderFactory) topicSpecFromSpec(topicsInSpec []entity.SinkTopic) *entity.TopicSpecification {

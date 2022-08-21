@@ -17,9 +17,10 @@ const (
 	dlqTopicReplicationFactor   = 3
 )
 
-func (e *extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
+func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 
-	if e.config.spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
+	if !e.config.createTopics ||
+		e.config.spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
 		return nil
 	}
 
@@ -53,7 +54,7 @@ func (e *extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 	return nil
 }
 
-func (e *extractor) createDlqProducer(pf ProducerFactory) error {
+func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 
 	if e.config.spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
 		return nil
@@ -65,8 +66,6 @@ func (e *extractor) createDlqProducer(pf ProducerFactory) error {
 	// Add producer specific non-optional props
 	kconfig["enable.idempotence"] = true
 	kconfig["compression.type"] = "lz4"
-	kconfig["acks"] = "all"
-	kconfig["max.in.flight.requests.per.connection"] = 5
 
 	for k, v := range e.config.configMap {
 		kconfig[k] = v
@@ -82,11 +81,11 @@ func (e *extractor) createDlqProducer(pf ProducerFactory) error {
 	return nil
 }
 
-func (e *extractor) dlqTopicName() string {
+func (e *Extractor) dlqTopicName() string {
 	return dlqTopicPrefix + e.config.spec.Id()
 }
 
-func (e *extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) action {
+func (e *Extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) action {
 
 	var a action
 	for _, m := range msgs {
@@ -98,7 +97,7 @@ func (e *extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) 
 	return a
 }
 
-func (e *extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action {
+func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action {
 
 	// Infinite loop here to ensure we never loose a message. For long disruptions this consumer's partitions
 	// will be reassigned to another consumer after the session times out, which in worst case might lead to

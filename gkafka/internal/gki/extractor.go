@@ -20,13 +20,21 @@ const (
 	actionShutdown
 )
 
+// Kafka props which cannot be overridden, required by Extractor
+const (
+	PropAutoCommit      = "enable.auto.commit"
+	PropAutoOffsetStore = "enable.auto.offset.store"
+)
+
+const DefaultPollTimeoutMs = 3000
+
 var log *logger.Log
 
 func init() {
 	log = logger.New()
 }
 
-type extractor struct {
+type Extractor struct {
 	cf          ConsumerFactory
 	pf          ProducerFactory
 	consumer    Consumer
@@ -37,22 +45,36 @@ type extractor struct {
 	eventCount  int64
 }
 
-func NewExtractor(config *Config, id string) (*extractor, error) {
+func NewExtractor(config *Config, id string) (*Extractor, error) {
 
-	e := &extractor{
+	e := &Extractor{
 		cf:     DefaultConsumerFactory{},
 		pf:     DefaultProducerFactory{},
 		config: config,
 		id:     id,
 	}
 	if len(config.topics) == 0 {
-		return e, fmt.Errorf("no topics provided when creating extractor: %+v", e)
+		return e, fmt.Errorf("no topics provided when creating Extractor: %+v", e)
 	}
-	log.Infof(e.lgprfx()+"extractor created with config: %s", e.config)
+
+	// Ensure required consumer props are set correctly.
+	// With the two prop values below we ensure no message loss while maximizing throughput.
+	// Messages verified written to the sink will have its offsets stored in-mem via
+	// extractor.storeOffsets(), while the enabled auto-commit will commit all the stored
+	// offsets at appropriate interval.
+	e.config.configMap[PropAutoCommit] = true
+	e.config.configMap[PropAutoOffsetStore] = false
+
+	// Ensure appropriate final configurable props
+	if e.config.pollTimeoutMs == 0 {
+		e.config.pollTimeoutMs = DefaultPollTimeoutMs
+	}
+
+	log.Infof(e.lgprfx()+"Extractor created with config: %s", e.config)
 	return e, nil
 }
 
-func (e *extractor) StreamExtract(
+func (e *Extractor) StreamExtract(
 	ctx context.Context,
 	reportEvent entity.ProcessEventFunc,
 	err *error,
@@ -168,7 +190,7 @@ func (e *extractor) StreamExtract(
 			str := fmt.Sprintf("(%s) Kafka error in consumer, code: %v, event: %v", e.config.spec.Id(), evt.Code(), evt)
 			log.Warnf(e.lgprfx() + str) // Most errors are recoverable
 
-			// In case of all brokers down, terminate the extractor and let Executor/Supervisor decide what to do.
+			// In case of all brokers down, terminate the Extractor and let Executor/Supervisor decide what to do.
 			if evt.Code() == kafka.ErrAllBrokersDown {
 				*err = errors.New(str)
 				run = false
@@ -185,7 +207,7 @@ func (e *extractor) StreamExtract(
 	}
 }
 
-func (e *extractor) handleEventProcessingResult(
+func (e *Extractor) handleEventProcessingResult(
 	ctx context.Context,
 	msgs []*kafka.Message,
 	result entity.EventProcessingResult,
@@ -203,17 +225,17 @@ func (e *extractor) handleEventProcessingResult(
 		return actionContinue
 
 	case entity.ExecutorStatusShutdown:
-		log.Warnf(e.lgprfx()+"shutting down extractor due to executor shutdown, reportEvent result: %+v", result)
+		log.Warnf(e.lgprfx()+"shutting down Extractor due to executor shutdown, reportEvent result: %+v", result)
 		return actionShutdown
 
 	case entity.ExecutorStatusRetriesExhausted:
-		*err = fmt.Errorf(e.lgprfx()+"executor failed all retries, shutting down extractor, handing over to executor, reportEvent result: %+v", result)
+		*err = fmt.Errorf(e.lgprfx()+"executor failed all retries, shutting down Extractor, handing over to executor, reportEvent result: %+v", result)
 		return actionShutdown
 
 	case entity.ExecutorStatusError:
 		*retryable = false
 		if result.Retryable {
-			*err = fmt.Errorf(e.lgprfx() + "bug, executor should handle all retryable errors, until retries exhausted, shutting down extractor")
+			*err = fmt.Errorf(e.lgprfx() + "bug, executor should handle all retryable errors, until retries exhausted, shutting down Extractor")
 			return actionShutdown
 		}
 		str := e.lgprfx() + "executor had an unretryable error with this "
@@ -250,7 +272,7 @@ func (e *extractor) handleEventProcessingResult(
 	return actionShutdown
 }
 
-func (e *extractor) initStreamExtract(ctx context.Context) error {
+func (e *Extractor) initStreamExtract(ctx context.Context) error {
 	var err error
 
 	if err = e.createConsumer(e.cf); err != nil {
@@ -275,7 +297,7 @@ func (e *extractor) initStreamExtract(ctx context.Context) error {
 	return nil
 }
 
-func (e *extractor) closeStreamExtract() {
+func (e *Extractor) closeStreamExtract() {
 	if !isNil(e.consumer) {
 		log.Infof(e.lgprfx()+"closing Kafka consumer %+v, consumed events: %d", e.consumer, e.eventCount)
 		if err := e.consumer.Close(); err != nil {
@@ -290,7 +312,7 @@ func (e *extractor) closeStreamExtract() {
 	log.Infof(e.lgprfx() + "terminated")
 }
 
-func (e *extractor) Extract(
+func (e *Extractor) Extract(
 	ctx context.Context,
 	query entity.ExtractorQuery,
 	result any) (error, bool) {
@@ -299,7 +321,7 @@ func (e *extractor) Extract(
 	return errors.New("not supported"), false
 }
 
-func (e *extractor) ExtractFromSink(
+func (e *Extractor) ExtractFromSink(
 	ctx context.Context,
 	query entity.ExtractorQuery,
 	result *[]*entity.Transformed) (error, bool) {
@@ -307,20 +329,20 @@ func (e *extractor) ExtractFromSink(
 	return errors.New("not supported"), false
 }
 
-func (e *extractor) SendToSource(ctx context.Context, eventData any) (string, error) {
+func (e *Extractor) SendToSource(ctx context.Context, eventData any) (string, error) {
 	log.Error(e.lgprfx() + "not applicable")
 	return "", nil
 }
 
-func (e *extractor) SetConsumerFactory(cf ConsumerFactory) {
+func (e *Extractor) SetConsumerFactory(cf ConsumerFactory) {
 	e.cf = cf
 }
 
-func (e *extractor) SetProducerFactory(pf ProducerFactory) {
+func (e *Extractor) SetProducerFactory(pf ProducerFactory) {
 	e.pf = pf
 }
 
-func (e *extractor) createConsumer(cf ConsumerFactory) error {
+func (e *Extractor) createConsumer(cf ConsumerFactory) error {
 
 	kconfig := make(kafka.ConfigMap)
 	for k, v := range e.config.configMap {
@@ -339,7 +361,7 @@ func (e *extractor) createConsumer(cf ConsumerFactory) error {
 	return nil
 }
 
-func (e *extractor) storeOffsets(msgs []*kafka.Message) error {
+func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 
 	var offsets []kafka.TopicPartition
 
@@ -362,8 +384,8 @@ func (e *extractor) storeOffsets(msgs []*kafka.Message) error {
 	return err
 }
 
-func (e *extractor) lgprfx() string {
-	return "[xkafka.extractor:" + e.id + "] "
+func (e *Extractor) lgprfx() string {
+	return "[xkafka.Extractor:" + e.id + "] "
 }
 
 func microBatchTimedOut(start time.Time, mbTimeoutMs int) bool {
@@ -372,4 +394,8 @@ func microBatchTimedOut(start time.Time, mbTimeoutMs int) bool {
 
 func isNil(v any) bool {
 	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil())
+}
+
+func (e *Extractor) KafkaConfig() (pollTimeoutMs int, cfgMap map[string]any) {
+	return e.config.pollTimeoutMs, e.config.configMap
 }

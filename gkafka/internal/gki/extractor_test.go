@@ -176,7 +176,7 @@ func TestMoveToDLQ(t *testing.T) {
 	assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
 }
 
-func createMockExtractor(spec *entity.Spec) (*extractor, error) {
+func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
 	config := NewExtractorConfig(spec, []string{"coolTopic"}, &sync.Mutex{})
 
 	config.SetPollTimout(2000)
