@@ -2,6 +2,7 @@ package gki
 
 import "github.com/confluentinc/confluent-kafka-go/kafka"
 
+// Consumer interface is used to enable full unit testing
 type Consumer interface {
 	SubscribeTopics(topics []string, rebalanceCb kafka.RebalanceCb) error
 	Poll(timeoutMs int) (event kafka.Event)

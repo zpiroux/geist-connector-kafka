@@ -9,8 +9,9 @@ import (
 
 type ConfigMap map[string]any
 
-// Config is the internal config used by each extractor/loader, combining config from external 
-// Config with config from what is inside the stream spec for this specific stream
+// Config is the internal config used by each extractor/loader, combining config
+// from external Config with config from what is inside the stream spec for this
+// specific stream
 type Config struct {
 	spec               *entity.Spec
 	topics             []string                   // list of topics to consume from by Extractor
@@ -19,6 +20,7 @@ type Config struct {
 	configMap          ConfigMap                  // supports all possible Kafka consumer properties
 	topicCreationMutex *sync.Mutex
 	synchronous        bool
+	createTopics       bool
 }
 
 func (c *Config) String() string {
@@ -54,6 +56,10 @@ func NewLoaderConfig(
 
 func (c *Config) SetPollTimout(timeout int) {
 	c.pollTimeoutMs = timeout
+}
+
+func (c *Config) SetCreateTopics(value bool) {
+	c.createTopics = value
 }
 
 func (c *Config) SetKafkaProperty(prop string, value any) {

@@ -6,8 +6,108 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zpiroux/geist"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
 	"github.com/zpiroux/geist/entity"
 )
+
+func TestConfig(t *testing.T) {
+	ctx := context.Background()
+
+	// Test Extractor with empty external config
+	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnv)
+	assert.NoError(t, err)
+	config := &Config{}
+	ef := NewExtractorFactory(config)
+	extractor, err := ef.NewExtractor(ctx, spec, "someId")
+	assert.NoError(t, err)
+	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
+	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
+	expectedConfigMap := map[string]any{
+		PropQueuedMaxMessagesKb: DefaultQueuedMaxMessagesKb,
+		PropMaxPollInterval:     DefaultMaxPollInterval,
+		gki.PropAutoOffsetStore: false,
+		gki.PropAutoCommit:      true,
+		"group.id":              "geisttest-mock-2",
+	}
+	assert.Equal(t, expectedConfigMap, cfgMap)
+
+	// Test Extractor with non-empty external config
+	config = &Config{
+		PollTimeoutMs: 27000,
+		KafkaProps: map[string]any{
+			PropBootstrapServers:    "mybootstrapserver",
+			PropSASLUsername:        "myusername",
+			PropSASLPassword:        "mypassword",
+			PropSASLMechanism:       "SCRAM-SHA-512",
+			PropQueuedMaxMessagesKb: 5000,
+			PropMaxPollInterval:     200000,
+			gki.PropAutoOffsetStore: true,
+			gki.PropAutoCommit:      false,
+		},
+	}
+	ef = NewExtractorFactory(config)
+	extractor, err = ef.NewExtractor(ctx, spec, "someId")
+	assert.NoError(t, err)
+	pollTimeout, cfgMap = extractor.(*gki.Extractor).KafkaConfig()
+	assert.Equal(t, 27000, pollTimeout)
+	expectedConfigMap = map[string]any{
+		PropQueuedMaxMessagesKb: 5000,
+		PropMaxPollInterval:     200000,
+		gki.PropAutoOffsetStore: false,
+		gki.PropAutoCommit:      true,
+		"group.id":              "geisttest-mock-2",
+		PropBootstrapServers:    "mybootstrapserver",
+		PropSASLUsername:        "myusername",
+		PropSASLPassword:        "mypassword",
+		PropSASLMechanism:       "SCRAM-SHA-512",
+	}
+	assert.Equal(t, expectedConfigMap, cfgMap)
+
+	// Test Loader with empty external config
+	spec, err = entity.NewSpec(kafkaToKafkaDevOnly)
+	assert.NoError(t, err)
+	config = &Config{
+		Env: "dev",
+	}
+	lf := NewLoaderFactory(config)
+	loader, err := lf.NewLoader(ctx, spec, "someId")
+	assert.NoError(t, err)
+	expectedConfigMap = map[string]any{
+		PropIdempotence:     true,
+		PropCompressionType: "lz4",
+		"client.id":         "geisttest_mock-1",
+	}
+	cfgMap = loader.(*gki.Loader).KafkaConfig()
+	assert.Equal(t, expectedConfigMap, cfgMap)
+
+	// Test Loader with non-empty external config
+	config = &Config{
+		Env: "dev",
+		KafkaProps: map[string]any{
+			PropBootstrapServers: "mybootstrapserver",
+			PropSASLUsername:     "myusername",
+			PropSASLPassword:     "mypassword",
+			PropSASLMechanism:    "PLAIN",
+			PropIdempotence:      false,
+			PropCompressionType:  "zstd",
+		},
+	}
+	expectedConfigMap = map[string]any{
+		PropBootstrapServers: "mybootstrapserver",
+		PropSASLUsername:     "myusername",
+		PropSASLPassword:     "mypassword",
+		PropSASLMechanism:    "PLAIN",
+		PropIdempotence:      false,
+		PropCompressionType:  "zstd",
+		"client.id":          "geisttest_mock-1",
+	}
+	lf = NewLoaderFactory(config)
+	loader, err = lf.NewLoader(ctx, spec, "someId")
+	assert.NoError(t, err)
+	cfgMap = loader.(*gki.Loader).KafkaConfig()
+	assert.Equal(t, expectedConfigMap, cfgMap)
+
+}
 
 func TestGeistIntegration(t *testing.T) {
 

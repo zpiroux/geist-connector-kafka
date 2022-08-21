@@ -233,6 +233,10 @@ func (l *Loader) deliveryReportHandler(ctxParent context.Context, ctxThis contex
 
 func (l *Loader) createTopic(ctx context.Context, topicSpec *entity.TopicSpecification) error {
 
+	if !l.config.createTopics {
+		return nil
+	}
+
 	// Not really needed in current topic creation implementation, but keep for now
 	l.config.topicCreationMutex.Lock()
 	defer l.config.topicCreationMutex.Unlock()
@@ -263,4 +267,8 @@ func (l *Loader) createTopic(ctx context.Context, topicSpec *entity.TopicSpecifi
 
 func (l *Loader) lgprfx() string {
 	return "[xkafka.loader:" + l.id + "] "
+}
+
+func (l *Loader) KafkaConfig() map[string]any {
+	return l.config.configMap
 }
