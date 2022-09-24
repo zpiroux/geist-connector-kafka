@@ -3,17 +3,23 @@ package gkafka
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
 	"github.com/zpiroux/geist/entity"
 )
 
-const entityTypeId = "kafka"
+// Errors
+var (
+	// ErrMissingGroupID is returned from NewExtractor() if a "group.id" value is not found
+	ErrMissingGroupID = errors.New("group.id is missing in config")
+)
 
 // Kafka properties commonly used and for setting up default config.
 // See https://docs.confluent.io/platform/current/clients/librdkafka/html/md_CONFIGURATION.html
-// for all properties.
+// for all properties that can be used for connector configuration.
 const (
 	// General
 	PropBootstrapServers = "bootstrap.servers"
@@ -23,12 +29,21 @@ const (
 	PropSASLPassword     = "sasl.password"
 
 	// Consumer
+	PropGroupID             = "group.id"
 	PropQueuedMaxMessagesKb = "queued.max.messages.kbytes"
 	PropMaxPollInterval     = "max.poll.interval.ms"
 
 	// Producer
 	PropIdempotence     = "enable.idempotence"
 	PropCompressionType = "compression.type"
+)
+
+// Special prop constructs
+const (
+	// If "group.id" property is assigned with this value on the format
+	// "@UniqueWithPrefix.my-groupid-prefix" a unique group.id value will be generated
+	// on the format "my-groupid-prefix.<unique extractor id>.<ISO UTC timestamp micros>"
+	UniqueGroupIDWithPrefix = "@UniqueWithPrefix"
 )
 
 // Config is the external config provided by the geist client to the factory when
@@ -59,15 +74,22 @@ type Config struct {
 	CreateTopics bool
 }
 
+// Default values if omitted in external config
 const (
-	// increase from 5 min default to 10 min
+	// Interval increase from 5 min default to 10 min
 	DefaultMaxPollInterval = 600000
 
 	// Maximum number of kilobytes per topic+partition in the local consumer queue.
 	// To not go OOM if big backlog, set this low. Default is 1 048 576 KB  = 1GB
-	// per partition! A few MBs seems to give good enough throughput while keeping
+	// per partition. A few MBs seems to give good enough throughput while keeping
 	// memory requirements low.
 	DefaultQueuedMaxMessagesKb = 2048
+)
+
+// Internal constants
+const (
+	entityTypeId          = "kafka"
+	timestampLayoutMicros = "2006-01-02T15.04.05.000000Z"
 )
 
 // kafkaTopicCreationMutex reduces the amount of unneeded requests for certain stream
@@ -82,8 +104,7 @@ var kafkaTopicCreationMutex sync.Mutex
 // Extractor
 //
 
-// extractorFactory is a singleton enabling extractors/sources to be handled as
-// plug-ins to Geist
+// extractorFactory is a singleton enabling extractors/sources to be handled as plug-ins to Geist
 type extractorFactory struct {
 	config *Config
 }
@@ -99,10 +120,16 @@ func (ef *extractorFactory) SourceId() string {
 }
 
 func (ef *extractorFactory) NewExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
-	return gki.NewExtractor(ef.createKafkaExtractorConfig(spec), id)
+	cfg, err := ef.createKafkaExtractorConfig(spec, id)
+	if err != nil {
+		return nil, err
+	}
+	return gki.NewExtractor(cfg, id)
 }
 
-func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec) *gki.Config {
+func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec, id string) (*gki.Config, error) {
+
+	var err error
 
 	c := gki.NewExtractorConfig(
 		spec,
@@ -120,9 +147,18 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec) *gki.C
 		props[k] = v
 	}
 
-	// Add all props from GEIST stream spec (will override previously set ones)
+	// Add all props from GEIST stream spec (will override previously set ones).
+	// Apply Geist-specific assignments.
 	for _, prop := range spec.Source.Config.Properties {
+		if prop.Key == PropGroupID && strings.Contains(prop.Value, UniqueGroupIDWithPrefix) {
+			prop.Value = uniqueGroupID(prop.Value, id, timestampLayoutMicros)
+		}
 		props[prop.Key] = prop.Value
+	}
+
+	groupId, ok := props[PropGroupID]
+	if !ok || groupId == "" {
+		return c, ErrMissingGroupID
 	}
 
 	c.SetProps(props)
@@ -136,7 +172,12 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec) *gki.C
 	// This is currently not possible to override in stream specs
 	c.SetCreateTopics(ef.config.CreateTopics)
 
-	return c
+	return c, err
+}
+
+func uniqueGroupID(groupIDSpec, extractorID, tsLayout string) string {
+	str := strings.TrimPrefix(groupIDSpec, UniqueGroupIDWithPrefix) + "-" + extractorID + "-" + time.Now().UTC().Format(tsLayout)
+	return strings.TrimPrefix(str, ".")
 }
 
 func (ef *extractorFactory) topicNamesFromSpec(topicsInSpec []entity.Topics) []string {

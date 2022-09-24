@@ -111,55 +111,58 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 	mCopy.TopicPartition.Partition = kafka.PartitionAny
 	for i := 0; ; i++ {
 
-		if ctx.Err() == context.Canceled {
-			log.Warnf(e.lgprfx() + "context canceled received in DLQ producer, shutting down")
-			return actionShutdown
-		}
-
-		log.Debugf(e.lgprfx()+"sending event to DLQ with producer: %+v", e.dlqProducer)
-
-		err = e.dlqProducer.Produce(&mCopy, nil)
-
-		log.Debugf(e.lgprfx()+"Produce() returned err: %v", err)
-
-		if err == nil {
-			event := <-e.dlqProducer.Events()
-			switch dlqMsg := event.(type) {
-			case *kafka.Message:
-				if dlqMsg.TopicPartition.Error != nil {
-					err = fmt.Errorf("DLQ publish failed with err: %v", dlqMsg.TopicPartition.Error)
-				} else {
-					log.Infof(e.lgprfx()+"event published to DLQ %s [%d] at offset %v, value: %s",
-						*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition,
-						dlqMsg.TopicPartition.Offset, string(dlqMsg.Value))
-
-					// TODO: When migrated to new common producer, move this out to Extractor
-					if serr := e.storeOffsets([]*kafka.Message{m}); serr != nil {
-						// No need to handle this error, just log it
-						log.Errorf(e.lgprfx()+"error storing offsets after dlq, event: %+v, err: %v", m, serr)
-					}
-					return actionContinue
-				}
-			case kafka.Error:
-				err = fmt.Errorf("kafka error in dlq producer, code: %v, event: %v", dlqMsg.Code(), dlqMsg)
-				// In case of all brokers down, terminate (will be restarted with exponential back-off)
-				if dlqMsg.Code() == kafka.ErrAllBrokersDown {
-					return actionShutdown
-				}
-			default:
-				// Docs don't say if this could happen in single event produce.
-				// Probably not, but if so it might only lead to duplicates, so keep warn log here.
-				log.Warnf(e.lgprfx()+"unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
-			}
-		}
-
 		if err != nil {
 			log.Errorf(e.lgprfx()+"failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, e.dlqTopicName(), err, backoffDuration)
 			time.Sleep(time.Duration(backoffDuration) * time.Second)
-
 			if backoffDuration < dlqMaxPublishBackoffTimeSec {
 				backoffDuration *= 2
 			}
 		}
+
+		log.Debugf(e.lgprfx()+"sending event to DLQ with producer: %+v", e.dlqProducer)
+		err = e.dlqProducer.Produce(&mCopy, nil)
+
+		if err != nil {
+			continue
+		}
+
+		event := <-e.dlqProducer.Events()
+		switch dlqMsg := event.(type) {
+		case *kafka.Message:
+			if dlqMsg.TopicPartition.Error == nil {
+				e.handleEventPublishedToDLQ(m, dlqMsg)
+				return actionContinue
+			}
+
+			err = fmt.Errorf("DLQ publish failed with err: %v", dlqMsg.TopicPartition.Error)
+
+		case kafka.Error:
+			err = fmt.Errorf("kafka error in dlq producer, code: %v, event: %v", dlqMsg.Code(), dlqMsg)
+			// In case of all brokers down, terminate (will be restarted with exponential back-off)
+			if dlqMsg.Code() == kafka.ErrAllBrokersDown {
+				return actionShutdown
+			}
+		default:
+			// Docs don't say if this could happen in single event produce.
+			// Probably not, but if so it might only lead to duplicates, so keep warn log here.
+			log.Warnf(e.lgprfx()+"unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
+		}
+
+		if ctx.Err() == context.Canceled {
+			log.Warnf(e.lgprfx() + "context canceled received in DLQ producer, shutting down")
+			return actionShutdown
+		}
+	}
+}
+
+func (e *Extractor) handleEventPublishedToDLQ(msg, dlqMsg *kafka.Message) {
+	log.Infof(e.lgprfx()+"event published to DLQ %s [%d] at offset %v, value: %s",
+		*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition,
+		dlqMsg.TopicPartition.Offset, string(dlqMsg.Value))
+
+	// TODO: When migrated to new common producer, move this out to Extractor
+	if serr := e.storeOffsets([]*kafka.Message{msg}); serr != nil {
+		// No need to handle this error, just log it
+		log.Errorf(e.lgprfx()+"error storing offsets after dlq, event: %+v, err: %v", msg, serr)
 	}
 }

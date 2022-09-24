@@ -2,7 +2,10 @@ package gkafka
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zpiroux/geist"
@@ -27,7 +30,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     DefaultMaxPollInterval,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		"group.id":              "geisttest-mock-2",
+		PropGroupID:             "geisttest-mock-2",
 	}
 	assert.Equal(t, expectedConfigMap, cfgMap)
 
@@ -55,7 +58,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     200000,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		"group.id":              "geisttest-mock-2",
+		PropGroupID:             "geisttest-mock-2",
 		PropBootstrapServers:    "mybootstrapserver",
 		PropSASLUsername:        "myusername",
 		PropSASLPassword:        "mypassword",
@@ -106,7 +109,39 @@ func TestConfig(t *testing.T) {
 	assert.NoError(t, err)
 	cfgMap = loader.(*gki.Loader).KafkaConfig()
 	assert.Equal(t, expectedConfigMap, cfgMap)
+}
 
+func TestMissingGroupID(t *testing.T) {
+	ctx := context.Background()
+	spec, err := entity.NewSpec(kafkaToVoidMissingGroupID)
+	assert.NoError(t, err)
+	ef := NewExtractorFactory(&Config{})
+	_, err = ef.NewExtractor(ctx, spec, "some-id")
+	assert.True(t, errors.Is(err, ErrMissingGroupID))
+}
+
+func TestUniqueGroupID(t *testing.T) {
+
+	tsLayout := "2006-01-02T15.04.05"
+
+	groupId := uniqueGroupID(UniqueGroupIDWithPrefix+".foo", "extrid", tsLayout)
+	assert.Equal(t, "foo-extrid-"+time.Now().UTC().Format(tsLayout), groupId)
+
+	groupId = uniqueGroupID(UniqueGroupIDWithPrefix+"", "extrid", tsLayout)
+	assert.Equal(t, "-extrid-"+time.Now().UTC().Format(tsLayout), groupId)
+
+	groupId = uniqueGroupID(UniqueGroupIDWithPrefix+".foo.bar", "extrid", tsLayout)
+	assert.Equal(t, "foo.bar-extrid-"+time.Now().UTC().Format(tsLayout), groupId)
+
+	ctx := context.Background()
+	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
+	assert.NoError(t, err)
+	ef := NewExtractorFactory(&Config{Env: envs[envProd]})
+	extractor, err := ef.NewExtractor(ctx, spec, "some-id")
+	assert.NoError(t, err)
+	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
+	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
+	assert.True(t, strings.Contains(cfgMap[PropGroupID].(string), "my-groupid-prefix-some-id-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap[PropGroupID])
 }
 
 func TestGeistIntegration(t *testing.T) {
@@ -137,6 +172,62 @@ func TestGeistIntegration(t *testing.T) {
 
 	err = geist.Run(ctx)
 	assert.NoError(t, err)
+}
+
+type envType int
+
+// Although the test here uses geist pre-provided stage names,
+// any custom name is supported as string, matching the env given to the factory
+// with the env specified in the stream spec.
+const (
+	envDev envType = iota
+	envStage
+	envProd
+)
+
+var envs = map[envType]string{
+	envDev:   string(entity.EnvironmentDev),
+	envStage: string(entity.EnvironmentStage),
+	envProd:  string(entity.EnvironmentProd),
+}
+
+func TestTopicNamesFromSpec(t *testing.T) {
+
+	ef := NewExtractorFactory(&Config{Env: envs[envDev]})
+	kef := ef.(*extractorFactory)
+
+	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
+	assert.NoError(t, err)
+	topics := kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	assert.Equal(t, topics, []string{"foo.events.dev"})
+
+	kef.config.Env = envs[envStage]
+	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	assert.Equal(t, topics, []string{"foo.events.stage"})
+
+	kef.config.Env = envs[envProd]
+	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	assert.Equal(t, topics, []string{"foo.events"})
+
+	spec, err = entity.NewSpec(kafkaToVoidStreamCommonEnv)
+	assert.NoError(t, err)
+	for _, env := range envs {
+		kef.config.Env = env
+		topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+		assert.Equal(t, topics, []string{"foo.events", "bar.events"})
+	}
+
+	// Test handling of missing envs
+	spec, err = entity.NewSpec(kafkaToKafkaDevOnly)
+	assert.NoError(t, err)
+	kef.config.Env = envs[envProd]
+	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	assert.Empty(t, topics)
+
+	lf := NewLoaderFactory(&Config{Env: envs[envProd]})
+	klf := lf.(*loaderFactory)
+	topicSpec := klf.topicSpecFromSpec(spec.Sink.Config.Topic)
+	assert.Nil(t, topicSpec)
 }
 
 type MockExtractorFactory struct {
@@ -171,7 +262,10 @@ func (d *dummyExtractor) StreamExtract(
 	reportEvent entity.ProcessEventFunc,
 	err *error,
 	retryable *bool) {
+
+	// Not applicable
 }
+
 func (d *dummyExtractor) Extract(ctx context.Context, query entity.ExtractorQuery, result any) (error, bool) {
 	return nil, false
 }
@@ -216,64 +310,9 @@ type dummyLoader struct{}
 func (d *dummyLoader) StreamLoad(ctx context.Context, data []*entity.Transformed) (string, error, bool) {
 	return "", nil, false
 }
-func (d *dummyLoader) Shutdown() {}
 
-type envType int
-
-// Although the test here uses geist pre-provided stage names,
-// any custom name is supported as string, matching the env given to the factory
-// with the env specified in the stream spec.
-const (
-	envDev envType = iota
-	envStage
-	envProd
-)
-
-var envs = map[envType]string{
-	envDev:   string(entity.EnvironmentDev),
-	envStage: string(entity.EnvironmentStage),
-	envProd:  string(entity.EnvironmentProd),
-}
-
-// TODO: Add test for validating Kafka config conversions from ext to internal
-
-func TestTopicNamesFromSpec(t *testing.T) {
-
-	ef := NewExtractorFactory(&Config{Env: envs[envDev]})
-	kef := ef.(*extractorFactory)
-
-	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
-	assert.NoError(t, err)
-	topics := kef.topicNamesFromSpec(spec.Source.Config.Topics)
-	assert.Equal(t, topics, []string{"foo.events.dev"})
-
-	kef.config.Env = envs[envStage]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
-	assert.Equal(t, topics, []string{"foo.events.stage"})
-
-	kef.config.Env = envs[envProd]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
-	assert.Equal(t, topics, []string{"foo.events"})
-
-	spec, err = entity.NewSpec(kafkaToVoidStreamCommonEnv)
-	assert.NoError(t, err)
-	for _, env := range envs {
-		kef.config.Env = env
-		topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
-		assert.Equal(t, topics, []string{"foo.events", "bar.events"})
-	}
-
-	// Test handling of missing envs
-	spec, err = entity.NewSpec(kafkaToKafkaDevOnly)
-	assert.NoError(t, err)
-	kef.config.Env = envs[envProd]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
-	assert.Empty(t, topics)
-
-	lf := NewLoaderFactory(&Config{Env: envs[envProd]})
-	klf := lf.(*loaderFactory)
-	topicSpec := klf.topicSpecFromSpec(spec.Sink.Config.Topic)
-	assert.Nil(t, topicSpec)
+func (d *dummyLoader) Shutdown() {
+	// Nothing to shut down
 }
 
 var (
@@ -310,7 +349,7 @@ var (
          "properties": [
             {
                "key": "group.id",
-               "value": "geisttest-mock-1"
+               "value": "@UniqueWithPrefix.my-groupid-prefix"
             }
          ]
       }
@@ -407,6 +446,33 @@ var (
             {
                "key": "group.id",
                "value": "geisttest-mock-2"
+            }
+         ]
+      }
+   },
+   "transform": {},
+   "sink": {
+      "type": "void"
+   }
+}
+`)
+
+	kafkaToVoidMissingGroupID = []byte(`
+{
+   "namespace": "geisttest",
+   "streamIdSuffix": "mock-3",
+   "version": 1,
+   "description": "...",
+   "source": {
+      "type": "kafka",
+      "config": {
+         "provider": "confluent",
+         "topics": [
+            {
+               "env": "all",
+               "names": [
+                  "foo.events"
+               ]
             }
          ]
       }
