@@ -67,7 +67,7 @@ func TestExtractor(t *testing.T) {
 	cancel()
 }
 
-func TestExtractor_RetryableFailure(t *testing.T) {
+func TestRetryableFailure(t *testing.T) {
 
 	var retryable bool
 
@@ -81,7 +81,7 @@ func TestExtractor_RetryableFailure(t *testing.T) {
 
 		extractor.StreamExtract(
 			context.Background(),
-			reportEvent_RetryableFailure,
+			reportEventWithRetryableFailure,
 			&err,
 			&retryable)
 
@@ -92,7 +92,7 @@ func TestExtractor_RetryableFailure(t *testing.T) {
 	}
 }
 
-func TestExtractor_UnretryableFailure(t *testing.T) {
+func TestUnretryableFailure(t *testing.T) {
 
 	var retryable bool
 
@@ -110,7 +110,7 @@ func TestExtractor_UnretryableFailure(t *testing.T) {
 		go func() {
 			extractor.StreamExtract(
 				ctx,
-				reportEvent_UnretryableFailure,
+				reportEventWithUnretryableFailure,
 				&err,
 				&retryable)
 			wg.Done()
@@ -263,7 +263,7 @@ func reportEvent(ctx context.Context, events []entity.Event) entity.EventProcess
 
 const ErrRetriesExhausted = "executor reached max retry limit"
 
-func reportEvent_RetryableFailure(ctx context.Context, events []entity.Event) entity.EventProcessingResult {
+func reportEventWithRetryableFailure(ctx context.Context, events []entity.Event) entity.EventProcessingResult {
 	return entity.EventProcessingResult{
 		Status:    entity.ExecutorStatusRetriesExhausted,
 		Error:     fmt.Errorf(ErrRetriesExhausted+", for event: %+v", events),
@@ -273,7 +273,7 @@ func reportEvent_RetryableFailure(ctx context.Context, events []entity.Event) en
 
 const ErrUnretryableError = "executor encountered an unretryable error"
 
-func reportEvent_UnretryableFailure(ctx context.Context, events []entity.Event) entity.EventProcessingResult {
+func reportEventWithUnretryableFailure(ctx context.Context, events []entity.Event) entity.EventProcessingResult {
 	return entity.EventProcessingResult{
 		Status:    entity.ExecutorStatusError,
 		Error:     fmt.Errorf(ErrUnretryableError+", for event: %+v", events),
@@ -344,7 +344,9 @@ func (p MockDlqProducer) Flush(timeoutMs int) int {
 	return 0
 }
 
-func (p MockDlqProducer) Close() {}
+func (p MockDlqProducer) Close() {
+	// Nothing to close
+}
 
 func GetMockSpec() *entity.Spec {
 

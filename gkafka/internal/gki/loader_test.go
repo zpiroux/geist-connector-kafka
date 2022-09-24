@@ -12,7 +12,7 @@ import (
 	"github.com/zpiroux/geist/entity/transform"
 )
 
-func TestLoader_StreamLoad(t *testing.T) {
+func TestStreamLoad(t *testing.T) {
 
 	var (
 		retryable        bool
@@ -85,7 +85,9 @@ func (p MockProducer) Flush(timeoutMs int) int {
 	return 0
 }
 
-func (p MockProducer) Close() {}
+func (p MockProducer) Close() {
+	// Nothing to close
+}
 
 var genericSourceToKafkaSinkSpec = []byte(`
 {
