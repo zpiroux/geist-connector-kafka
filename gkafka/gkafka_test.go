@@ -30,7 +30,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     DefaultMaxPollInterval,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		"group.id":              "geisttest-mock-2",
+		PropGroupID:             "geisttest-mock-2",
 	}
 	assert.Equal(t, expectedConfigMap, cfgMap)
 
@@ -58,7 +58,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     200000,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		"group.id":              "geisttest-mock-2",
+		PropGroupID:             "geisttest-mock-2",
 		PropBootstrapServers:    "mybootstrapserver",
 		PropSASLUsername:        "myusername",
 		PropSASLPassword:        "mypassword",
@@ -141,7 +141,7 @@ func TestUniqueGroupID(t *testing.T) {
 	assert.NoError(t, err)
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
-	assert.True(t, strings.Contains(cfgMap["group.id"].(string), "my-groupid-prefix-some-id-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap["group.id"])
+	assert.True(t, strings.Contains(cfgMap[PropGroupID].(string), "my-groupid-prefix-some-id-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap[PropGroupID])
 }
 
 func TestGeistIntegration(t *testing.T) {
