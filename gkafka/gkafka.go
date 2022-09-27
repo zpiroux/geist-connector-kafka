@@ -72,6 +72,13 @@ type Config struct {
 	// (if configured in stream specs), and Loader is allowed to create specified
 	// topics if they do not exists.
 	CreateTopics bool
+
+	// SendToSource specifies if the Extractor's SendToSource() method should be
+	// available for use in certain stream scenarios. For example, if we have a
+	// stream spec with Kafka set as source, having SendToSource set to true will
+	// make it possible to send events to this stream with geist.Publish().
+	// Having it disabled reduces memory footprint.
+	SendToSource bool
 }
 
 // Default values if omitted in external config
@@ -171,6 +178,7 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec, id str
 
 	// This is currently not possible to override in stream specs
 	c.SetCreateTopics(ef.config.CreateTopics)
+	c.SetSendToSource(ef.config.SendToSource)
 
 	return c, err
 }
