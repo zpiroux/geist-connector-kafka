@@ -25,8 +25,8 @@ type Config struct {
 }
 
 func (c *Config) String() string {
-	return fmt.Sprintf("topics: %v, pollTimeoutMs: %d, synchronous: %v, props: %+v",
-		c.topics, c.pollTimeoutMs, c.synchronous, displayConfig(c.configMap))
+	return fmt.Sprintf("topics: %v, pollTimeoutMs: %d, synchronous: %v, createTopics: %v, sendToSourceEnabled: %v props: %+v",
+		c.topics, c.pollTimeoutMs, c.synchronous, c.createTopics, c.sendToSourceEnabled, displayConfig(c.configMap))
 }
 
 func NewExtractorConfig(

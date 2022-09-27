@@ -77,7 +77,7 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 		return fmt.Errorf(e.lgprfx()+"Failed to create DLQ producer: %s", err.Error())
 	}
 
-	log.Infof(e.lgprfx()+"Created DLQ Producer %+v, with config: %+v", e.dlqProducer, kconfig)
+	log.Infof(e.lgprfx() + "DLQ Producer created")
 	return nil
 }
 

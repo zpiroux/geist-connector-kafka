@@ -66,6 +66,8 @@ func NewLoader(ctx context.Context, config *Config, id string, pf ProducerFactor
 		l.shutdownDeliveryReportHandler = cancel
 		go l.deliveryReportHandler(ctx, ctxDRH)
 	}
+
+	log.Infof(l.lgprfx()+"Loader created with config: %s", l.config)
 	return l, nil
 }
 
@@ -130,7 +132,6 @@ func (l *Loader) createProducer() error {
 		return fmt.Errorf(l.lgprfx()+"Failed to create producer: %s", err.Error())
 	}
 
-	log.Infof(l.lgprfx()+"Created producer %+v with config: %s", l.producer, l.config)
 	return nil
 
 }

@@ -435,7 +435,7 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 		// number of topic partitions *and* spec.ops.microBatch is set to true.
 		// This will in worst case cause duplicates but no loss. There is no point
 		// retrying, and no run-time fix, so just logging error.
-		// To avoid this from happening, increase spec.ops.streamsPerPod so that the
+		// To prevent this from happening, increase spec.ops.streamsPerPod so that the
 		// total number across all pods is closer to the number of topic partitions.
 		log.Errorf(e.lgprfx()+"error storing offsets, event: %+v, tp: %v, err: %v", msgs, offsets, err)
 	}
@@ -459,10 +459,9 @@ func (e *Extractor) createSourceProducer(pf ProducerFactory) error {
 	e.sourceProducer, err = e.pf.NewProducer(&kconfig)
 
 	if err != nil {
-		return fmt.Errorf(e.lgprfx()+"Failed to create source producer: %s", err.Error())
+		return fmt.Errorf(e.lgprfx()+"failed to create source producer: %s", err.Error())
 	}
 
-	log.Infof(e.lgprfx()+"Created source Producer %+v, with config: %+v", e.dlqProducer, kconfig)
 	return nil
 }
 
