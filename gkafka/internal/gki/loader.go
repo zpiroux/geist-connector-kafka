@@ -83,7 +83,15 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &l.config.sinkTopic.Name, Partition: kafka.PartitionAny},
-		Value:          data[0].Data[payloadKey].([]byte), // TODO: Get type from spec, to not require byte
+	}
+
+	switch value := data[0].Data[payloadKey].(type) {
+	case []byte:
+		msg.Value = value
+	case string:
+		msg.Value = []byte(value)
+	default:
+		return "", fmt.Errorf("invalid payload data type used in spec, type = %T", value), false
 	}
 
 	return l.publishMessage(context.Background(), msg)

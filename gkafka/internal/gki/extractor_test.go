@@ -11,6 +11,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -176,6 +177,29 @@ func TestMoveToDLQ(t *testing.T) {
 	assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
 }
 
+func TestSendToSource(t *testing.T) {
+
+	nbPublishToFail = 0
+	ctx := context.Background()
+	spec := GetMockSpec()
+	spec.StreamIdSuffix = "send-to-source"
+	extractor, err := createMockExtractor(spec)
+	extractor.config.SetSendToSource(true)
+	assert.NoError(t, err)
+	err = extractor.initStreamExtract(ctx)
+	assert.NoError(t, err)
+
+	event := "Hi there!"
+	_, err = extractor.SendToSource(ctx, event)
+	require.NoError(t, err)
+	assert.Equal(t, event, string(extractor.sourceProducer.(*MockDlqProducer).lastSuccessfulEvent.Value))
+
+	eventBytes := []byte("Hi again!")
+	_, err = extractor.SendToSource(ctx, eventBytes)
+	assert.NoError(t, err)
+	assert.Equal(t, string(eventBytes), string(extractor.sourceProducer.(*MockDlqProducer).lastSuccessfulEvent.Value))
+}
+
 func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
 	config := NewExtractorConfig(spec, []string{"coolTopic"}, &sync.Mutex{})
 
@@ -302,6 +326,7 @@ func NewMockDlqProducer() Producer {
 type MockDlqProducer struct {
 	events                  chan kafka.Event
 	nbFailedPublishReported int
+	lastSuccessfulEvent     *kafka.Message
 }
 
 func (p *MockDlqProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
@@ -332,6 +357,7 @@ func (p *MockDlqProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Ev
 		}
 	}
 	msg.TopicPartition.Error = nil
+	p.lastSuccessfulEvent = msg
 	dChan <- msg
 	return nil
 }

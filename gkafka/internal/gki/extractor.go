@@ -35,14 +35,15 @@ func init() {
 }
 
 type Extractor struct {
-	cf          ConsumerFactory
-	pf          ProducerFactory
-	consumer    Consumer
-	dlqProducer Producer
-	config      *Config
-	ac          AdminClient
-	id          string
-	eventCount  int64
+	cf             ConsumerFactory
+	pf             ProducerFactory
+	consumer       Consumer
+	dlqProducer    Producer
+	sourceProducer Producer
+	config         *Config
+	ac             AdminClient
+	id             string
+	eventCount     int64
 }
 
 func NewExtractor(config *Config, id string) (*Extractor, error) {
@@ -291,6 +292,9 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 	if err = e.createDlqProducer(e.pf); err != nil {
 		return err
 	}
+	if err = e.createSourceProducer(e.pf); err != nil {
+		return err
+	}
 	if err = e.consumer.SubscribeTopics(e.config.topics, nil); err != nil {
 		return fmt.Errorf(e.lgprfx()+"failed subscribing to topics '%v' with err: %v", e.config.topics, err)
 	}
@@ -329,9 +333,58 @@ func (e *Extractor) ExtractFromSink(
 	return errors.New("not supported"), false
 }
 
+// SendToSource is meant for occasional event publish to the topic used by the extractor
+// to consume from. The focus of the function is on resilient and synchronous event
+// sending rather than high throughput scenarios.
+// If the stream spec specifies multiple topics to consume from by the extractor, the
+// first one will always be used as the one to use with SendToSource.
 func (e *Extractor) SendToSource(ctx context.Context, eventData any) (string, error) {
-	log.Error(e.lgprfx() + "not applicable")
-	return "", nil
+
+	if !e.config.sendToSourceEnabled {
+		return "", fmt.Errorf("disabled - set Config.SendToSource to true in extractor factory to enable it")
+	}
+
+	var err error
+	deliveryChan := make(chan kafka.Event, 64)
+
+	topic := &e.config.topics[0]
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: topic, Partition: kafka.PartitionAny},
+	}
+
+	switch value := eventData.(type) {
+	case []byte:
+		msg.Value = value
+	case string:
+		msg.Value = []byte(value)
+	default:
+		return "", fmt.Errorf("invalid payload eventData type (%T), must be string or []byte", value)
+	}
+
+	err = e.sourceProducer.Produce(msg, deliveryChan)
+
+	if err != nil {
+		return "", err
+	}
+
+	for event := range deliveryChan {
+		switch srcMsg := event.(type) {
+
+		case *kafka.Message:
+			if srcMsg.TopicPartition.Error != nil {
+				err = fmt.Errorf("SendToSource publish failed with err: %v", srcMsg.TopicPartition.Error)
+			}
+			return "", err
+
+		case kafka.Error:
+			return "", fmt.Errorf("kafka error in SendToSource producer, code: %v, event: %v", srcMsg.Code(), srcMsg)
+
+		default:
+			log.Warnf(e.lgprfx()+"unexpected Kafka info event in SendToSource, %+v, waiting for proper event response", srcMsg)
+		}
+	}
+
+	return "", err
 }
 
 func (e *Extractor) SetConsumerFactory(cf ConsumerFactory) {
@@ -377,11 +430,40 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 	offsets, err := e.consumer.StoreOffsets(offsets)
 
 	if err != nil {
-		// Should "never" happen since it's an in-mem operation. If it does (e.g. due to some app/client bug) there
-		// is no point retrying, and no run-time fix, so just log error. Will in worst case cause duplicates, no loss.
+		// One example when this error could happen is during a redeployment of the
+		// hosting service *and* spec.ops.streamsPerPod is set much lower than the
+		// number of topic partitions *and* spec.ops.microBatch is set to true.
+		// This will in worst case cause duplicates but no loss. There is no point
+		// retrying, and no run-time fix, so just logging error.
+		// To avoid this from happening, increase spec.ops.streamsPerPod so that the
+		// total number across all pods is closer to the number of topic partitions.
 		log.Errorf(e.lgprfx()+"error storing offsets, event: %+v, tp: %v, err: %v", msgs, offsets, err)
 	}
 	return err
+}
+
+func (e *Extractor) createSourceProducer(pf ProducerFactory) error {
+
+	if !e.config.sendToSourceEnabled {
+		return nil
+	}
+
+	var err error
+	kconfig := make(kafka.ConfigMap)
+	kconfig["enable.idempotence"] = true
+
+	for k, v := range e.config.configMap {
+		kconfig[k] = v
+	}
+
+	e.sourceProducer, err = e.pf.NewProducer(&kconfig)
+
+	if err != nil {
+		return fmt.Errorf(e.lgprfx()+"Failed to create source producer: %s", err.Error())
+	}
+
+	log.Infof(e.lgprfx()+"Created source Producer %+v, with config: %+v", e.dlqProducer, kconfig)
+	return nil
 }
 
 func (e *Extractor) lgprfx() string {
