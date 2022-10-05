@@ -34,6 +34,12 @@ func TestMicroBatchTimeout(t *testing.T) {
 	assert.True(t, timedOut)
 }
 
+func handleNotificationEvents(notifyChan entity.NotifyChan) {
+	for event := range notifyChan {
+		fmt.Printf("%+v\n", event)
+	}
+}
+
 func TestExtractor(t *testing.T) {
 
 	var (
@@ -86,7 +92,6 @@ func TestRetryableFailure(t *testing.T) {
 			&err,
 			&retryable)
 
-		log.Debugf("stream extract returned err: %v", err)
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), ErrRetriesExhausted))
 		assert.True(t, retryable)
@@ -143,12 +148,15 @@ func TestMoveToDLQ(t *testing.T) {
 		err error
 	)
 
+	notifyChan := make(entity.NotifyChan, 128)
+	go handleNotificationEvents(notifyChan)
+
 	spec := GetMockSpec()
 	spec.Ops.HandlingOfUnretryableEvents = entity.HoueDlq
-	config := NewExtractorConfig(spec, []string{"coolTopic"}, &sync.Mutex{})
+	config := NewExtractorConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
 
 	config.SetPollTimout(2000)
-	extractor, err := NewExtractor(config, "mockInstanceId")
+	extractor, err := NewExtractor(config)
 	assert.NoError(t, err)
 	extractor.SetConsumerFactory(cf)
 
@@ -201,7 +209,10 @@ func TestSendToSource(t *testing.T) {
 }
 
 func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
-	config := NewExtractorConfig(spec, []string{"coolTopic"}, &sync.Mutex{})
+	notifyChan := make(entity.NotifyChan, 128)
+	go handleNotificationEvents(notifyChan)
+
+	config := NewExtractorConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
 
 	config.SetPollTimout(2000)
 	config.SetProps(ConfigMap{
@@ -211,7 +222,7 @@ func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
 	config.SetProps(ConfigMap{
 		"prop3": "value3",
 	})
-	extractor, err := NewExtractor(config, "mockInstanceId")
+	extractor, err := NewExtractor(config)
 	extractor.SetConsumerFactory(MockConsumerFactory{})
 	extractor.SetProducerFactory(MockDlqProducerFactory{})
 	return extractor, err

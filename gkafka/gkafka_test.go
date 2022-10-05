@@ -21,7 +21,7 @@ func TestConfig(t *testing.T) {
 	assert.NoError(t, err)
 	config := &Config{}
 	ef := NewExtractorFactory(config)
-	extractor, err := ef.NewExtractor(ctx, spec, "someId")
+	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "someId"})
 	assert.NoError(t, err)
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
@@ -49,7 +49,7 @@ func TestConfig(t *testing.T) {
 		},
 	}
 	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, spec, "someId")
+	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "someId"})
 	assert.NoError(t, err)
 	pollTimeout, cfgMap = extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, 27000, pollTimeout)
@@ -73,7 +73,7 @@ func TestConfig(t *testing.T) {
 		Env: "dev",
 	}
 	lf := NewLoaderFactory(config)
-	loader, err := lf.NewLoader(ctx, spec, "someId")
+	loader, err := lf.NewLoader(ctx, entity.Config{Spec: spec, ID: "someId"})
 	assert.NoError(t, err)
 	expectedConfigMap = map[string]any{
 		PropIdempotence:     true,
@@ -105,7 +105,7 @@ func TestConfig(t *testing.T) {
 		"client.id":          "geisttest_mock-1",
 	}
 	lf = NewLoaderFactory(config)
-	loader, err = lf.NewLoader(ctx, spec, "someId")
+	loader, err = lf.NewLoader(ctx, entity.Config{Spec: spec, ID: "someId"})
 	assert.NoError(t, err)
 	cfgMap = loader.(*gki.Loader).KafkaConfig()
 	assert.Equal(t, expectedConfigMap, cfgMap)
@@ -116,7 +116,7 @@ func TestMissingGroupID(t *testing.T) {
 	spec, err := entity.NewSpec(kafkaToVoidMissingGroupID)
 	assert.NoError(t, err)
 	ef := NewExtractorFactory(&Config{})
-	_, err = ef.NewExtractor(ctx, spec, "some-id")
+	_, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-id"})
 	assert.True(t, errors.Is(err, ErrMissingGroupID))
 }
 
@@ -137,7 +137,7 @@ func TestUniqueGroupID(t *testing.T) {
 	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
 	assert.NoError(t, err)
 	ef := NewExtractorFactory(&Config{Env: envs[envProd]})
-	extractor, err := ef.NewExtractor(ctx, spec, "some-id")
+	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-id"})
 	assert.NoError(t, err)
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
@@ -246,7 +246,7 @@ func (mef *MockExtractorFactory) SourceId() string {
 	return mef.realExtractorFactory.SourceId()
 }
 
-func (mef *MockExtractorFactory) NewExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
+func (mef *MockExtractorFactory) NewExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
 	return &dummyExtractor{}, nil
 }
 
@@ -292,11 +292,11 @@ func (mlf *MockLoaderFactory) SinkId() string {
 	return mlf.realLoaderFactory.SinkId()
 }
 
-func (mlf *MockLoaderFactory) NewLoader(ctx context.Context, spec *entity.Spec, id string) (entity.Loader, error) {
+func (mlf *MockLoaderFactory) NewLoader(ctx context.Context, c entity.Config) (entity.Loader, error) {
 	return &dummyLoader{}, nil
 }
 
-func (mlf *MockLoaderFactory) NewSinkExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
+func (mlf *MockLoaderFactory) NewSinkExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
 	return &dummyExtractor{}, nil
 }
 

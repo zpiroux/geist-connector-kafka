@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/teltech/logger"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/notify"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -18,14 +20,14 @@ type Loader struct {
 	producer                      Producer
 	ac                            AdminClient
 	config                        *Config
-	id                            string
 	eventCount                    int64
 	requestShutdown               bool
 	sm                            sync.Mutex // shutdown mutex
 	shutdownDeliveryReportHandler context.CancelFunc
+	notifier                      *notify.Notifier
 }
 
-func NewLoader(ctx context.Context, config *Config, id string, pf ProducerFactory) (*Loader, error) {
+func NewLoader(ctx context.Context, config *Config, pf ProducerFactory) (*Loader, error) {
 
 	var err error
 	if isNil(pf) {
@@ -35,7 +37,6 @@ func NewLoader(ctx context.Context, config *Config, id string, pf ProducerFactor
 	l := &Loader{
 		pf:     pf,
 		config: config,
-		id:     id,
 	}
 
 	if config.sinkTopic == nil {
@@ -43,6 +44,12 @@ func NewLoader(ctx context.Context, config *Config, id string, pf ProducerFactor
 	} else if config.sinkTopic.Name == "" {
 		return l, fmt.Errorf("no topic name provided when creating loader: %+v", l)
 	}
+
+	var log *logger.Log
+	if config.c.Log {
+		log = logger.New()
+	}
+	l.notifier = notify.New(config.c.NotifyChan, log, 2, "gkafka.loader", l.config.c.ID, "")
 
 	if err = l.createProducer(); err != nil {
 		return l, err
@@ -67,7 +74,7 @@ func NewLoader(ctx context.Context, config *Config, id string, pf ProducerFactor
 		go l.deliveryReportHandler(ctx, ctxDRH)
 	}
 
-	log.Infof(l.lgprfx()+"Loader created with config: %s", l.config)
+	l.notifier.Notify(entity.NotifyLevelInfo, "Loader created with config: %s", l.config)
 	return l, nil
 }
 
@@ -81,7 +88,7 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 		return "", errors.New("streamLoad called without data to load (data[0] == nil)"), false
 	}
 
-	payloadKey := l.config.spec.Sink.Config.Message.PayloadFromId
+	payloadKey := l.config.c.Spec.Sink.Config.Message.PayloadFromId
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &l.config.sinkTopic.Name, Partition: kafka.PartitionAny},
@@ -102,19 +109,19 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 func (l *Loader) Shutdown() {
 	l.sm.Lock()
 	defer l.sm.Unlock()
-	log.Infof(l.lgprfx() + "shutdown initiated")
+	l.notifier.Notify(entity.NotifyLevelInfo, "shutdown initiated")
 	if l.producer != nil {
 		if unflushed := l.producer.Flush(flushTimeoutSec * 1000); unflushed > 0 {
-			log.Errorf(l.lgprfx() + "%d messages did not get flushed during shutdown, check for potential message loss")
+			l.notifier.Notify(entity.NotifyLevelError, "%d messages did not get flushed during shutdown, check for potential message loss", unflushed)
 		} else {
-			log.Infof(l.lgprfx() + "all messages flushed")
+			l.notifier.Notify(entity.NotifyLevelInfo, "all messages flushed")
 		}
 		if l.shutdownDeliveryReportHandler != nil {
 			l.shutdownDeliveryReportHandler()
 		}
 		l.producer.Close()
 		l.producer = nil
-		log.Infof(l.lgprfx()+"shutdown completed, number of published events: %d", l.eventCount)
+		l.notifier.Notify(entity.NotifyLevelInfo, "shutdown completed, number of published events: %d", l.eventCount)
 	}
 }
 
@@ -144,17 +151,17 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 		retryable  bool
 	)
 
-	if l.config.spec.Ops.LogEventData {
-		log.Debugf(l.lgprfx()+"sending event %+v with producer: %+v", string(m.Value), l.producer)
+	if l.config.c.Spec.Ops.LogEventData {
+		l.notifier.Notify(entity.NotifyLevelDebug, "sending event %+v with producer: %+v", string(m.Value), l.producer)
 	}
 
 	start := time.Now()
 	err = l.producer.Produce(m, nil)
 
 	if !l.config.synchronous {
-		if l.config.spec.Ops.LogEventData {
+		if l.config.c.Spec.Ops.LogEventData {
 			duration := time.Since(start)
-			log.Infof(l.lgprfx()+"event enqueued async [duration: %v] with err: %v", duration, err)
+			l.notifier.Notify(entity.NotifyLevelInfo, "event enqueued async [duration: %v] with err: %v", duration, err)
 		}
 		return resourceId, err, true
 	}
@@ -168,9 +175,9 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 				retryable = true
 			} else {
 				l.eventCount++
-				if l.config.spec.Ops.LogEventData {
+				if l.config.c.Spec.Ops.LogEventData {
 					duration := time.Since(start)
-					log.Infof(l.lgprfx()+"event published [duration: %v] to %s [%d] at offset: %v, key: %v value: %s",
+					l.notifier.Notify(entity.NotifyLevelInfo, "event published [duration: %v] to %s [%d] at offset: %v, key: %v value: %s",
 						duration, *msg.TopicPartition.Topic, msg.TopicPartition.Partition,
 						msg.TopicPartition.Offset, string(msg.Key), string(msg.Value))
 				}
@@ -189,7 +196,7 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 			retryable = true
 		}
 	} else {
-		log.Errorf(l.lgprfx()+"kafka.producer.Produce() failed with err: %v, msg: %+v, topic: %s", err, m, l.config.topics[0], err)
+		l.notifier.Notify(entity.NotifyLevelError, "kafka.producer.Produce() failed with err: %v, msg: %+v, topic: %s", err, m, l.config.topics[0])
 		retryable = true // Treat all these kinds of errors as retryable for now
 	}
 
@@ -202,11 +209,11 @@ func (l *Loader) deliveryReportHandler(ctxParent context.Context, ctxThis contex
 		select {
 
 		case <-ctxParent.Done():
-			log.Infof(l.lgprfx() + "[DRH] parent ctx closed, requesting shutdown")
+			l.notifier.Notify(entity.NotifyLevelInfo, "[DRH] parent ctx closed, requesting shutdown")
 			l.requestShutdown = true
 
 		case <-ctxThis.Done():
-			log.Infof(l.lgprfx() + "[DRH] ctx closed, shutting down")
+			l.notifier.Notify(entity.NotifyLevelInfo, "[DRH] ctx closed, shutting down")
 			return
 
 		case e := <-l.producer.Events():
@@ -214,11 +221,11 @@ func (l *Loader) deliveryReportHandler(ctxParent context.Context, ctxThis contex
 			case *kafka.Message:
 				m := event
 				if m.TopicPartition.Error != nil {
-					log.Errorf(l.lgprfx()+"[DRH] publish failed with err: %v", m.TopicPartition.Error)
+					l.notifier.Notify(entity.NotifyLevelError, "[DRH] publish failed with err: %v", m.TopicPartition.Error)
 				} else {
 					l.eventCount++
-					if l.config.spec.Ops.LogEventData {
-						log.Infof(l.lgprfx()+"[DRH] event published to %s [%d] at offset: %v, key: %v value: %s",
+					if l.config.c.Spec.Ops.LogEventData {
+						l.notifier.Notify(entity.NotifyLevelInfo, "[DRH] event published to %s [%d] at offset: %v, key: %v value: %s",
 							*m.TopicPartition.Topic, m.TopicPartition.Partition,
 							m.TopicPartition.Offset, string(m.Key), string(m.Value))
 					}
@@ -227,14 +234,14 @@ func (l *Loader) deliveryReportHandler(ctxParent context.Context, ctxThis contex
 			case kafka.Error:
 				e := event
 				if e.IsFatal() {
-					log.Errorf(l.lgprfx()+"[DRH] fatal error: %v, requesting shutdown", e)
+					l.notifier.Notify(entity.NotifyLevelError, "[DRH] fatal error: %v, requesting shutdown", e)
 					l.requestShutdown = true
 				} else {
-					log.Errorf(l.lgprfx()+"[DRH] error: %v", e)
+					l.notifier.Notify(entity.NotifyLevelError, "[DRH] error: %v", e)
 				}
 
 			default:
-				log.Infof(l.lgprfx()+"[DRH] Ignored event: %s", event)
+				l.notifier.Notify(entity.NotifyLevelInfo, "[DRH] Ignored event: %s", event)
 			}
 		}
 	}
@@ -260,22 +267,22 @@ func (l *Loader) createTopic(ctx context.Context, topicSpec *entity.TopicSpecifi
 	res, err := l.ac.CreateTopics(ctx, []kafka.TopicSpecification{topic})
 
 	if err == nil {
-		log.Infof(l.lgprfx()+"topic created: %+v", res)
+		l.notifier.Notify(entity.NotifyLevelInfo, "topic created: %+v", res)
 		return nil
 	}
 
 	if err.Error() == kafka.ErrTopicAlreadyExists.String() {
-		log.Infof(l.lgprfx()+"topic %s for this stream already exists", topicSpec.Name)
+		l.notifier.Notify(entity.NotifyLevelInfo, "topic %s for this stream already exists", topicSpec.Name)
 		err = nil
 	} else {
-		log.Errorf(l.lgprfx()+"could not create topic with spec: %+v, err: %v", topic, err)
+		l.notifier.Notify(entity.NotifyLevelError, "could not create topic with spec: %+v, err: %v", topic, err)
 	}
 
 	return err
 }
 
 func (l *Loader) lgprfx() string {
-	return "[xkafka.loader:" + l.id + "] "
+	return "[" + l.notifier.Sender() + ":" + l.notifier.Instance() + "] "
 }
 
 func (l *Loader) KafkaConfig() map[string]any {

@@ -126,21 +126,21 @@ func (ef *extractorFactory) SourceId() string {
 	return entityTypeId
 }
 
-func (ef *extractorFactory) NewExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
-	cfg, err := ef.createKafkaExtractorConfig(spec, id)
+func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
+	cfg, err := ef.createKafkaExtractorConfig(c)
 	if err != nil {
 		return nil, err
 	}
-	return gki.NewExtractor(cfg, id)
+	return gki.NewExtractor(cfg)
 }
 
-func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec, id string) (*gki.Config, error) {
+func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Config, error) {
 
 	var err error
 
-	c := gki.NewExtractorConfig(
-		spec,
-		ef.topicNamesFromSpec(spec.Source.Config.Topics),
+	ec := gki.NewExtractorConfig(
+		c,
+		ef.topicNamesFromSpec(c.Spec.Source.Config.Topics),
 		&kafkaTopicCreationMutex)
 
 	// Deployment defaults - will be overridden if set in external config or stream spec
@@ -156,31 +156,36 @@ func (ef *extractorFactory) createKafkaExtractorConfig(spec *entity.Spec, id str
 
 	// Add all props from GEIST stream spec (will override previously set ones).
 	// Apply Geist-specific assignments.
-	for _, prop := range spec.Source.Config.Properties {
+	for _, prop := range c.Spec.Source.Config.Properties {
 		if prop.Key == PropGroupID && strings.Contains(prop.Value, UniqueGroupIDWithPrefix) {
-			prop.Value = uniqueGroupID(prop.Value, id, timestampLayoutMicros)
+			prop.Value = uniqueGroupID(prop.Value, c.ID, timestampLayoutMicros)
 		}
 		props[prop.Key] = prop.Value
 	}
 
 	groupId, ok := props[PropGroupID]
 	if !ok || groupId == "" {
-		return c, ErrMissingGroupID
+		return ec, ErrMissingGroupID
 	}
 
-	c.SetProps(props)
+	ec.SetProps(props)
 
-	if spec.Source.Config.PollTimeoutMs != nil {
-		c.SetPollTimout(*spec.Source.Config.PollTimeoutMs)
+	if c.Spec.Source.Config.PollTimeoutMs != nil {
+		ec.SetPollTimout(*c.Spec.Source.Config.PollTimeoutMs)
 	} else {
-		c.SetPollTimout(ef.config.PollTimeoutMs)
+		ec.SetPollTimout(ef.config.PollTimeoutMs)
+	}
+
+	if c.Spec.Source.Config.SendToSource != nil {
+		ec.SetSendToSource(*c.Spec.Source.Config.SendToSource)
+	} else {
+		ec.SetSendToSource(ef.config.SendToSource)
 	}
 
 	// This is currently not possible to override in stream specs
-	c.SetCreateTopics(ef.config.CreateTopics)
-	c.SetSendToSource(ef.config.SendToSource)
+	ec.SetCreateTopics(ef.config.CreateTopics)
 
-	return c, err
+	return ec, err
 }
 
 func uniqueGroupID(groupIDSpec, extractorID, tsLayout string) string {
@@ -225,33 +230,33 @@ func (lf *loaderFactory) SinkId() string {
 	return entityTypeId
 }
 
-func (lf *loaderFactory) NewLoader(ctx context.Context, spec *entity.Spec, id string) (entity.Loader, error) {
+func (lf *loaderFactory) NewLoader(ctx context.Context, c entity.Config) (entity.Loader, error) {
 
-	config, err := lf.createKafkaLoaderConfig(spec)
+	config, err := lf.createKafkaLoaderConfig(c)
 	if err != nil {
 		return nil, err
 	}
 
-	return gki.NewLoader(ctx, config, id, nil)
+	return gki.NewLoader(ctx, config, nil)
 }
 
-func (lf *loaderFactory) NewSinkExtractor(ctx context.Context, spec *entity.Spec, id string) (entity.Extractor, error) {
+func (lf *loaderFactory) NewSinkExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
 	return nil, nil
 }
 
-func (lf *loaderFactory) createKafkaLoaderConfig(spec *entity.Spec) (*gki.Config, error) {
+func (lf *loaderFactory) createKafkaLoaderConfig(c entity.Config) (*gki.Config, error) {
 
 	var sync bool
-	if spec.Sink.Config == nil {
+	if c.Spec.Sink.Config == nil {
 		return nil, errors.New("no sink config provided")
 	}
-	if spec.Sink.Config.Synchronous != nil {
-		sync = *spec.Sink.Config.Synchronous
+	if c.Spec.Sink.Config.Synchronous != nil {
+		sync = *c.Spec.Sink.Config.Synchronous
 	}
 
-	c := gki.NewLoaderConfig(
-		spec,
-		lf.topicSpecFromSpec(spec.Sink.Config.Topic),
+	lc := gki.NewLoaderConfig(
+		c,
+		lf.topicSpecFromSpec(c.Spec.Sink.Config.Topic),
 		&kafkaTopicCreationMutex,
 		sync)
 
@@ -267,16 +272,16 @@ func (lf *loaderFactory) createKafkaLoaderConfig(spec *entity.Spec) (*gki.Config
 	}
 
 	// Add all props from GEIST spec (will override previously set ones)
-	for _, prop := range spec.Sink.Config.Properties {
+	for _, prop := range c.Spec.Sink.Config.Properties {
 		props[prop.Key] = prop.Value
 	}
 
-	c.SetProps(props)
+	lc.SetLoaderProps(props)
 
 	// This is currently not possible to override in stream specs
-	c.SetCreateTopics(lf.config.CreateTopics)
+	lc.SetCreateTopics(lf.config.CreateTopics)
 
-	return c, nil
+	return lc, nil
 }
 
 func (s *loaderFactory) topicSpecFromSpec(topicsInSpec []entity.SinkTopic) *entity.TopicSpecification {
