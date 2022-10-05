@@ -6,7 +6,7 @@ require (
 	github.com/confluentinc/confluent-kafka-go v1.9.2
 	github.com/stretchr/testify v1.8.0
 	github.com/teltech/logger v1.2.2
-	github.com/zpiroux/geist v0.3.2
+	github.com/zpiroux/geist v0.4.1
 )
 
 require (

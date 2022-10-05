@@ -20,7 +20,7 @@ const (
 func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 
 	if !e.config.createTopics ||
-		e.config.spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
+		e.config.c.Spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
 		return nil
 	}
 
@@ -34,7 +34,7 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 
 	if !topicExists(dlqTopic, dlqTopicMetadata.Topics) {
 
-		log.Infof(e.lgprfx()+"DLQ topic doesn't exist for stream %s, metadata: %+v, err: %v", e.config.spec.Id(), dlqTopicMetadata, err)
+		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic doesn't exist for stream %s, metadata: %+v, err: %v", e.config.c.Spec.Id(), dlqTopicMetadata, err)
 		dlq := kafka.TopicSpecification{
 			Topic:             dlqTopic,
 			NumPartitions:     dlqTopicNumPartitions,
@@ -46,9 +46,9 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 		if err != nil {
 			return fmt.Errorf(e.lgprfx()+"could not create DLQ topic %+v, err: %v", dlq, err)
 		}
-		log.Infof(e.lgprfx()+"DLQ topic created: %+v", res)
+		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic created: %+v", res)
 	} else {
-		log.Infof(e.lgprfx()+"DLQ topic for this stream already exists with name: %s", dlqTopic)
+		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic for this stream already exists with name: %s", dlqTopic)
 	}
 
 	return nil
@@ -56,7 +56,7 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 
 func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 
-	if e.config.spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
+	if e.config.c.Spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
 		return nil
 	}
 
@@ -77,12 +77,12 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 		return fmt.Errorf(e.lgprfx()+"Failed to create DLQ producer: %s", err.Error())
 	}
 
-	log.Infof(e.lgprfx() + "DLQ Producer created")
+	e.notifier.Notify(entity.NotifyLevelInfo, "DLQ Producer created")
 	return nil
 }
 
 func (e *Extractor) dlqTopicName() string {
-	return dlqTopicPrefix + e.config.spec.Id()
+	return dlqTopicPrefix + e.config.c.Spec.Id()
 }
 
 func (e *Extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) action {
@@ -112,14 +112,14 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 	for i := 0; ; i++ {
 
 		if err != nil {
-			log.Errorf(e.lgprfx()+"failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, e.dlqTopicName(), err, backoffDuration)
+			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, e.dlqTopicName(), err, backoffDuration)
 			time.Sleep(time.Duration(backoffDuration) * time.Second)
 			if backoffDuration < dlqMaxPublishBackoffTimeSec {
 				backoffDuration *= 2
 			}
 		}
 
-		log.Debugf(e.lgprfx()+"sending event to DLQ with producer: %+v", e.dlqProducer)
+		e.notifier.Notify(entity.NotifyLevelDebug, "sending event to DLQ with producer: %+v", e.dlqProducer)
 		err = e.dlqProducer.Produce(&mCopy, nil)
 
 		if err != nil {
@@ -145,24 +145,24 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 		default:
 			// Docs don't say if this could happen in single event produce.
 			// Probably not, but if so it might only lead to duplicates, so keep warn log here.
-			log.Warnf(e.lgprfx()+"unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
+			e.notifier.Notify(entity.NotifyLevelWarn, "unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
 		}
 
 		if ctx.Err() == context.Canceled {
-			log.Warnf(e.lgprfx() + "context canceled received in DLQ producer, shutting down")
+			e.notifier.Notify(entity.NotifyLevelWarn, "context canceled received in DLQ producer, shutting down")
 			return actionShutdown
 		}
 	}
 }
 
 func (e *Extractor) handleEventPublishedToDLQ(msg, dlqMsg *kafka.Message) {
-	log.Infof(e.lgprfx()+"event published to DLQ %s [%d] at offset %v, value: %s",
+	e.notifier.Notify(entity.NotifyLevelInfo, "event published to DLQ %s [%d] at offset %v, value: %s",
 		*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition,
 		dlqMsg.TopicPartition.Offset, string(dlqMsg.Value))
 
 	// TODO: When migrated to new common producer, move this out to Extractor
 	if serr := e.storeOffsets([]*kafka.Message{msg}); serr != nil {
 		// No need to handle this error, just log it
-		log.Errorf(e.lgprfx()+"error storing offsets after dlq, event: %+v, err: %v", msg, serr)
+		e.notifier.Notify(entity.NotifyLevelError, "error storing offsets after dlq, event: %+v, err: %v", msg, serr)
 	}
 }

@@ -41,8 +41,11 @@ func createMockLoader(spec *entity.Spec, synchronous bool) (*Loader, error) {
 		NumPartitions:     3,
 		ReplicationFactor: 3,
 	}
-	config := NewLoaderConfig(spec, topicSpec, &sync.Mutex{}, synchronous)
-	loader, err := NewLoader(context.Background(), config, "mockInstanceId", MockProducerFactory{})
+	notifyChan := make(entity.NotifyChan, 128)
+	go handleNotificationEvents(notifyChan)
+
+	config := NewLoaderConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, topicSpec, &sync.Mutex{}, synchronous)
+	loader, err := NewLoader(context.Background(), config, MockProducerFactory{})
 	return loader, err
 }
 
