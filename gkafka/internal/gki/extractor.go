@@ -10,8 +10,8 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/teltech/logger"
-	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/notify"
 	"github.com/zpiroux/geist/entity"
+	"github.com/zpiroux/geist/pkg/notify"
 )
 
 type action int
@@ -69,7 +69,7 @@ func NewExtractor(config *Config) (*Extractor, error) {
 	if config.c.Log {
 		log = logger.New()
 	}
-	e.notifier = notify.New(config.c.NotifyChan, log, 2, "gkafka.extractor", e.config.c.ID, "")
+	e.notifier = notify.New(config.c.NotifyChan, log, 2, "gkafka.extractor", e.config.c.ID, config.c.Spec.Id())
 
 	e.notifier.Notify(entity.NotifyLevelInfo, "Extractor created with config: %s", e.config)
 	return e, nil
@@ -453,6 +453,9 @@ func (e *Extractor) createSourceProducer(pf ProducerFactory) error {
 	kconfig["enable.idempotence"] = true
 
 	for k, v := range e.config.configMap {
+		if _, ok := commonConsumerProps[k]; ok {
+			continue
+		}
 		kconfig[k] = v
 	}
 
