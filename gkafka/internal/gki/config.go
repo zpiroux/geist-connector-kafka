@@ -80,21 +80,21 @@ func (c *Config) SetProps(props ConfigMap) {
 func (c *Config) SetLoaderProps(props ConfigMap) {
 
 	// Clean out most common consumer props (if present) to reduce warning logs
-	commonConsumerProps := map[string]bool{
-		"group.id":                   true,
-		"session.timeout.ms":         true,
-		"max.poll.interval.ms":       true,
-		"enable.auto.commit":         true,
-		"enable.auto.offset.store":   true,
-		"queued.max.messages.kbytes": true,
-	}
-
 	for k, v := range props {
 		if _, ok := commonConsumerProps[k]; ok {
 			continue
 		}
 		c.configMap[k] = v
 	}
+}
+
+var commonConsumerProps = map[string]bool{
+	"group.id":                   true,
+	"session.timeout.ms":         true,
+	"max.poll.interval.ms":       true,
+	"enable.auto.commit":         true,
+	"enable.auto.offset.store":   true,
+	"queued.max.messages.kbytes": true,
 }
 
 func displayConfig(in ConfigMap) ConfigMap {

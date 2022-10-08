@@ -9,8 +9,8 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/teltech/logger"
-	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/notify"
 	"github.com/zpiroux/geist/entity"
+	"github.com/zpiroux/geist/pkg/notify"
 )
 
 const flushTimeoutSec = 10
@@ -49,7 +49,7 @@ func NewLoader(ctx context.Context, config *Config, pf ProducerFactory) (*Loader
 	if config.c.Log {
 		log = logger.New()
 	}
-	l.notifier = notify.New(config.c.NotifyChan, log, 2, "gkafka.loader", l.config.c.ID, "")
+	l.notifier = notify.New(config.c.NotifyChan, log, 2, "gkafka.loader", l.config.c.ID, config.c.Spec.Id())
 
 	if err = l.createProducer(); err != nil {
 		return l, err

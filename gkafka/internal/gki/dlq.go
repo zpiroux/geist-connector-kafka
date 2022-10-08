@@ -68,6 +68,9 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 	kconfig["compression.type"] = "lz4"
 
 	for k, v := range e.config.configMap {
+		if _, ok := commonConsumerProps[k]; ok {
+			continue
+		}
 		kconfig[k] = v
 	}
 
