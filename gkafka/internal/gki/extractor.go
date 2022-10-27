@@ -159,7 +159,9 @@ func (e *Extractor) StreamExtract(
 					Ts:   evt.Timestamp,
 					Data: evt.Value,
 				})
-				if len(events) < e.config.c.Spec.Ops.MicroBatchSize && microBatchBytes < e.config.c.Spec.Ops.MicroBatchBytes {
+				if len(events) < e.config.c.Spec.Ops.MicroBatchSize &&
+					microBatchBytes < e.config.c.Spec.Ops.MicroBatchBytes &&
+					!microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimoutMs) {
 					continue
 				}
 				if e.config.c.Spec.Ops.LogEventData {
@@ -208,6 +210,9 @@ func (e *Extractor) StreamExtract(
 	}
 }
 
+// handleEventProcessingResult processes the result from the downstream event processing
+// and returns actionContinue if extraction should continue or actionShutdown in case of
+// fatal/unretryable errors or normal shutdown scenarios.
 func (e *Extractor) handleEventProcessingResult(
 	ctx context.Context,
 	msgs []*kafka.Message,
