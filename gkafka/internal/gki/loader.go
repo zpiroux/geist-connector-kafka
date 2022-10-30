@@ -106,7 +106,7 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 	return l.publishMessage(context.Background(), msg)
 }
 
-func (l *Loader) Shutdown() {
+func (l *Loader) Shutdown(ctx context.Context) {
 	l.sm.Lock()
 	defer l.sm.Unlock()
 	l.notifier.Notify(entity.NotifyLevelInfo, "shutdown initiated")

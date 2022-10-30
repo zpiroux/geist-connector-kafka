@@ -250,7 +250,7 @@ func (mef *MockExtractorFactory) NewExtractor(ctx context.Context, c entity.Conf
 	return &dummyExtractor{}, nil
 }
 
-func (mef *MockExtractorFactory) Close() error {
+func (mef *MockExtractorFactory) Close(ctx context.Context) error {
 	return nil
 }
 
@@ -300,7 +300,7 @@ func (mlf *MockLoaderFactory) NewSinkExtractor(ctx context.Context, c entity.Con
 	return &dummyExtractor{}, nil
 }
 
-func (mlf *MockLoaderFactory) Close() error {
+func (mlf *MockLoaderFactory) Close(ctx context.Context) error {
 	return nil
 }
 
@@ -311,7 +311,7 @@ func (d *dummyLoader) StreamLoad(ctx context.Context, data []*entity.Transformed
 	return "", nil, false
 }
 
-func (d *dummyLoader) Shutdown() {
+func (d *dummyLoader) Shutdown(ctx context.Context) {
 	// Nothing to shut down
 }
 

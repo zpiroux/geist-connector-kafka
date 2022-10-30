@@ -207,7 +207,7 @@ func (ef *extractorFactory) topicNamesFromSpec(topicsInSpec []entity.Topics) []s
 	return topicNames
 }
 
-func (lf *extractorFactory) Close() error {
+func (lf *extractorFactory) Close(ctx context.Context) error {
 	return nil
 }
 
@@ -306,6 +306,6 @@ func (s *loaderFactory) topicSpecFromSpec(topicsInSpec []entity.SinkTopic) *enti
 	return topicSpec
 }
 
-func (lf *loaderFactory) Close() error {
+func (lf *loaderFactory) Close(ctx context.Context) error {
 	return nil
 }
