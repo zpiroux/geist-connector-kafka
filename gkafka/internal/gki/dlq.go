@@ -2,25 +2,72 @@ package gki
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/tidwall/sjson"
 	"github.com/zpiroux/geist/entity"
 )
 
 const (
 	metadataRequestTimeoutMs    = 5000
-	dlqTopicPrefix              = "geist.dlq."
 	dlqMaxPublishBackoffTimeSec = 30
 	dlqTopicNumPartitions       = 6
 	dlqTopicReplicationFactor   = 3
 )
 
-func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
+func NewDLQConfig(enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
+	var dlq DLQConfig
+	if topic == nil {
+		return dlq, errors.New("invalid DLQ config provided in stream spec")
+	}
 
-	if !e.config.createTopics ||
-		e.config.c.Spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
+	if topic.Name == "" {
+		return dlq, errors.New("no applicable DLQ topic name found from stream spec config")
+	}
+
+	dlq.Topic = topic
+	dlq.StreamIDEnrichmentPath = enrichPath
+	return dlq, nil
+}
+
+type DLQConfig struct {
+	// Topic specifies which topic to use for DLQ events. If the global extractor
+	// setting createTopics is set to false, only Topic.Name is regarded. Otherwise,
+	// NumPartitions and ReplicationFactor will be used as well if the topic is created
+	// (if it doesn't exist already).
+	Topic *entity.TopicSpecification
+
+	// If StreamIDEnrichmentPath is not empty it specifies the JSON path (e.g.
+	// "my.enrichment.streamId") including the JSON field name, which will hold the
+	//  value of the injected stream ID for the current stream. That is, before the
+	// event is sent to the DLQ the stream ID is added to a new field created in the
+	// event, if this option is used.
+	StreamIDEnrichmentPath string
+}
+
+func (e *Extractor) initDLQ(ctx context.Context) (err error) {
+
+	if e.config.c.Spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
+		return nil
+	}
+
+	if err = e.createDlqTopic(ctx); err != nil {
+		return err
+	}
+
+	if err = e.createDlqProducer(e.pf); err != nil {
+		return err
+	}
+
+	return err
+}
+
+func (e *Extractor) createDlqTopic(ctx context.Context) error {
+
+	if !e.config.createTopics {
 		return nil
 	}
 
@@ -32,13 +79,15 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 		return fmt.Errorf(e.lgprfx()+"could not get metadata from Kafka cluster, err: %v", err)
 	}
 
-	if !topicExists(dlqTopic, dlqTopicMetadata.Topics) {
+	topicConfig := e.config.dlqConfig.Topic
+
+	if !topicExists(topicConfig.Name, dlqTopicMetadata.Topics) {
 
 		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic doesn't exist for stream %s, metadata: %+v, err: %v", e.config.c.Spec.Id(), dlqTopicMetadata, err)
 		dlq := kafka.TopicSpecification{
-			Topic:             dlqTopic,
-			NumPartitions:     dlqTopicNumPartitions,
-			ReplicationFactor: dlqTopicReplicationFactor,
+			Topic:             topicConfig.Name,
+			NumPartitions:     topicConfig.NumPartitions,
+			ReplicationFactor: topicConfig.ReplicationFactor,
 		}
 
 		res, err := e.ac.CreateTopics(ctx, []kafka.TopicSpecification{dlq})
@@ -48,7 +97,7 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 		}
 		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic created: %+v", res)
 	} else {
-		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic for this stream already exists with name: %s", dlqTopic)
+		e.notifier.Notify(entity.NotifyLevelInfo, "DLQ topic for this stream already exists with name: %s", topicConfig.Name)
 	}
 
 	return nil
@@ -56,14 +105,10 @@ func (e *Extractor) createDlqTopic(ctx context.Context, dlqTopic string) error {
 
 func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 
-	if e.config.c.Spec.Ops.HandlingOfUnretryableEvents != entity.HoueDlq {
-		return nil
-	}
-
 	var err error
 	kconfig := make(kafka.ConfigMap)
 
-	// Add producer specific non-optional props
+	// Add producer specific props, overridable by the stream spec
 	kconfig["enable.idempotence"] = true
 	kconfig["compression.type"] = "lz4"
 
@@ -84,30 +129,40 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 	return nil
 }
 
-func (e *Extractor) dlqTopicName() string {
-	return dlqTopicPrefix + e.config.c.Spec.Id()
+func (e *Extractor) dlqTopicName() (topicName string) {
+	if e.config.dlqConfig.Topic != nil {
+		topicName = e.config.dlqConfig.Topic.Name
+	}
+	return
 }
 
-func (e *Extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) action {
+func (e *Extractor) moveEventsToDLQ(ctx context.Context, msgs []*kafka.Message) (a action, err error) {
 
-	var a action
 	for _, m := range msgs {
-		a = e.moveEventToDLQ(ctx, m)
+		a, err = e.moveEventToDLQ(ctx, m)
 		if a == actionShutdown {
 			break
 		}
 	}
-	return a
+	return a, err
 }
 
-func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action {
+func (e *Extractor) enrichWithStreamID(event []byte) ([]byte, error) {
+	return sjson.SetBytes(event, e.config.dlqConfig.StreamIDEnrichmentPath, e.config.c.Spec.Id())
+}
 
-	// Infinite loop here to ensure we never loose a message. For long disruptions this consumer's partitions
-	// will be reassigned to another consumer after the session times out, which in worst case might lead to
-	// duplicates, but no loss.
-	var err error
+func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a action, err error) {
+
+	// Infinite loop (or shutdown) here to ensure we never loose a message. For long
+	// disruptions this consumer's partitions will be reassigned to another consumer
+	// after the session times out, which in worst case might lead to duplicates, but
+	// no loss.
 	backoffDuration := 1
 	dlqTopic := e.dlqTopicName()
+
+	if dlqTopic == "" {
+		return actionShutdown, errors.New("invalid DLQ config, no DLQ topic name provided, shutting down stream")
+	}
 
 	mCopy := *m
 	mCopy.TopicPartition.Topic = &dlqTopic
@@ -115,10 +170,17 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 	for i := 0; ; i++ {
 
 		if err != nil {
-			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, e.dlqTopicName(), err, backoffDuration)
+			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, dlqTopic, err, backoffDuration)
 			time.Sleep(time.Duration(backoffDuration) * time.Second)
 			if backoffDuration < dlqMaxPublishBackoffTimeSec {
 				backoffDuration *= 2
+			}
+		}
+
+		if e.config.dlqConfig.StreamIDEnrichmentPath != "" {
+			mCopy.Value, err = e.enrichWithStreamID(mCopy.Value)
+			if err != nil {
+				e.notifier.Notify(entity.NotifyLevelError, "failed to enrich event (%+v) on DLQ topic '%s' with err: %v", m, dlqTopic, err)
 			}
 		}
 
@@ -134,7 +196,7 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 		case *kafka.Message:
 			if dlqMsg.TopicPartition.Error == nil {
 				e.handleEventPublishedToDLQ(m, dlqMsg)
-				return actionContinue
+				return actionContinue, err
 			}
 
 			err = fmt.Errorf("DLQ publish failed with err: %v", dlqMsg.TopicPartition.Error)
@@ -143,7 +205,7 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 			err = fmt.Errorf("kafka error in dlq producer, code: %v, event: %v", dlqMsg.Code(), dlqMsg)
 			// In case of all brokers down, terminate (will be restarted with exponential back-off)
 			if dlqMsg.Code() == kafka.ErrAllBrokersDown {
-				return actionShutdown
+				return actionShutdown, err
 			}
 		default:
 			// Docs don't say if this could happen in single event produce.
@@ -153,7 +215,7 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) action
 
 		if ctx.Err() == context.Canceled {
 			e.notifier.Notify(entity.NotifyLevelWarn, "context canceled received in DLQ producer, shutting down")
-			return actionShutdown
+			return actionShutdown, err
 		}
 	}
 }

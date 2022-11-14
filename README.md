@@ -50,6 +50,11 @@ The only special config option provided in addition to the Kafka-native ones is 
 
 If the `group.id` property is assigned with a value on the format `"@UniqueWithPrefix.my-groupid-prefix"` a unique `group.id` value will be generated on the format `"my-groupid-prefix.<unique extractor id>.<ISO UTC timestamp micros>"`.
 
+In addition to config as part of Kafka config properties, the following are available for a Kafka source in the stream spec:
+
+* Poll timeout: standard Kafka consumer config.
+* DLQ config:  If the stream is configured to use DLQ for unprocessable events (causing unretryable errors), the name of the DLQ topic needs to be provided here. If the extractor connector's `createTopics` config is set to true, the DLQ topic will be created automatically. See the DLQ struct in Geist Spec definition for more info.
+
 
 ## Limitations and improvement areas
 

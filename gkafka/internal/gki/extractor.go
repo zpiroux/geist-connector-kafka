@@ -264,7 +264,9 @@ func (e *Extractor) handleEventProcessingResult(
 			return actionContinue
 
 		case entity.HoueDlq:
-			return e.moveEventsToDLQ(ctx, msgs)
+			var a action
+			a, *err = e.moveEventsToDLQ(ctx, msgs)
+			return a
 
 		case entity.HoueFail:
 			str += " - since this stream's houe mode is set to HoueFail, the stream will now be shut down, requiring manual/external restart"
@@ -291,12 +293,10 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 	}
 	e.ac = admcli
 
-	if err = e.createDlqTopic(ctx, e.dlqTopicName()); err != nil {
+	if err = e.initDLQ(ctx); err != nil {
 		return err
 	}
-	if err = e.createDlqProducer(e.pf); err != nil {
-		return err
-	}
+
 	if err = e.createSourceProducer(e.pf); err != nil {
 		return err
 	}
@@ -441,7 +441,9 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 		// This will in worst case cause duplicates but no loss. There is no point
 		// retrying, and no run-time fix, so just logging error.
 		// To prevent this from happening, increase spec.ops.streamsPerPod so that the
-		// total number across all pods is closer to the number of topic partitions.
+		// total number across all pods is closer to the number of topic partitions,
+		// and change from Kafka's default partition assignment strategy to cooperative
+		// sticky.
 		e.notifier.Notify(entity.NotifyLevelError, "error storing offsets, event: %+v, tp: %v, err: %v", msgs, offsets, err)
 	}
 	return err
@@ -487,4 +489,8 @@ func isNil(v any) bool {
 
 func (e *Extractor) KafkaConfig() (pollTimeoutMs int, cfgMap map[string]any) {
 	return e.config.pollTimeoutMs, e.config.configMap
+}
+
+func (e *Extractor) DLQConfig() DLQConfig {
+	return e.config.dlqConfig
 }

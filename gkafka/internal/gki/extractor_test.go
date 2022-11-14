@@ -15,6 +15,8 @@ import (
 	"github.com/zpiroux/geist/entity"
 )
 
+const DLQTopicName = "my.dlq.topic"
+
 var (
 	eventsToConsume = 3
 	eventCount      = 0
@@ -49,7 +51,7 @@ func TestExtractor(t *testing.T) {
 	spec := GetMockSpec()
 	spec.StreamIdSuffix = "happy-path"
 	spec.Ops.HandlingOfUnretryableEvents = entity.HoueDefault
-	extractor, err := createMockExtractor(spec)
+	extractor, err := createMockExtractor(false, nil, spec)
 	assert.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -77,13 +79,17 @@ func TestExtractor(t *testing.T) {
 func TestRetryableFailure(t *testing.T) {
 
 	var retryable bool
+	dlqConfig := DLQConfig{Topic: &entity.TopicSpecification{
+		Name:              DLQTopicName,
+		NumPartitions:     1,
+		ReplicationFactor: 3}}
 
 	for _, houeMode := range allHoueModes {
 		eventCount = 0
 		spec := GetMockSpec()
 		spec.StreamIdSuffix = "retryable-failure"
 		spec.Ops.HandlingOfUnretryableEvents = houeMode
-		extractor, err := createMockExtractor(spec)
+		extractor, err := createMockExtractor(true, &dlqConfig, spec)
 		assert.NoError(t, err)
 
 		extractor.StreamExtract(
@@ -95,19 +101,32 @@ func TestRetryableFailure(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), ErrRetriesExhausted))
 		assert.True(t, retryable)
+
+		if houeMode == entity.HoueDlq {
+			assert.NotNil(t, extractor.dlqProducer)
+			expectedCreatedTopic := kafka.TopicSpecification{
+				Topic:             DLQTopicName,
+				NumPartitions:     1,
+				ReplicationFactor: 3,
+			}
+			assert.Equal(t, expectedCreatedTopic, extractor.ac.(*MockAdminClient).LastCreatedTopic)
+		} else {
+			assert.Nil(t, extractor.dlqProducer)
+		}
 	}
 }
 
 func TestUnretryableFailure(t *testing.T) {
 
 	var retryable bool
+	dlqConfig := DLQConfig{Topic: &entity.TopicSpecification{Name: DLQTopicName}}
 
 	for _, houeMode := range allHoueModes {
 		eventCount = 0
 		spec := GetMockSpec()
 		spec.StreamIdSuffix = "unretryable-failure"
 		spec.Ops.HandlingOfUnretryableEvents = houeMode
-		extractor, err := createMockExtractor(spec)
+		extractor, err := createMockExtractor(false, &dlqConfig, spec)
 		assert.NoError(t, err)
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -132,6 +151,14 @@ func TestUnretryableFailure(t *testing.T) {
 			assert.NoError(t, err)
 		}
 		assert.False(t, retryable)
+
+		if houeMode == entity.HoueDlq {
+			assert.NotNil(t, extractor.dlqProducer)
+			assert.Empty(t, extractor.ac.(*MockAdminClient).LastCreatedTopic)
+		} else {
+			assert.Nil(t, extractor.dlqProducer)
+		}
+
 	}
 }
 
@@ -143,9 +170,11 @@ var (
 func TestMoveToDLQ(t *testing.T) {
 
 	var (
-		cf  MockConsumerFactory
-		ctx = context.Background()
-		err error
+		cf           MockConsumerFactory
+		ctx          = context.Background()
+		err          error
+		a            action
+		dlqTopicName = DLQTopicName
 	)
 
 	notifyChan := make(entity.NotifyChan, 128)
@@ -155,13 +184,23 @@ func TestMoveToDLQ(t *testing.T) {
 	spec.Ops.HandlingOfUnretryableEvents = entity.HoueDlq
 	config := NewExtractorConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
 
+	// Also including validation of stream ID enrichment
+	config.SetDLQConfig(DLQConfig{
+		Topic:                  &entity.TopicSpecification{Name: dlqTopicName},
+		StreamIDEnrichmentPath: "_myenrichment.streamId",
+	})
 	config.SetPollTimout(2000)
 	extractor, err := NewExtractor(config)
 	assert.NoError(t, err)
 	extractor.SetConsumerFactory(cf)
 
 	msg := &kafka.Message{
-		Value: []byte("niceValue"),
+		Value: []byte(`{"some":"value"}`),
+	}
+
+	expectedMsginDLQ := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &dlqTopicName},
+		Value:          []byte(`{"some":"value","_myenrichment":{"streamId":"extractor-mockspec"}}`),
 	}
 
 	nbPublishToFail = 0
@@ -169,20 +208,31 @@ func TestMoveToDLQ(t *testing.T) {
 	extractor.SetProducerFactory(MockDlqProducerFactory{})
 	err = extractor.initStreamExtract(ctx)
 	assert.NoError(t, err)
-	extractor.moveEventToDLQ(ctx, msg)
-	assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	a, err = extractor.moveEventToDLQ(ctx, msg)
+	if assert.NoError(t, err) {
+		assert.Equal(t, actionContinue, a)
+		assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	}
+	assert.Equal(t, expectedMsginDLQ.Value, extractor.dlqProducer.(*MockDlqProducer).lastSuccessfulEvent.Value)
+	assert.Equal(t, expectedMsginDLQ.TopicPartition.Topic, extractor.dlqProducer.(*MockDlqProducer).lastSuccessfulEvent.TopicPartition.Topic)
 
 	nbPublishToFail = 1
 	nbPublishRequests = 0
 	extractor.dlqProducer.(*MockDlqProducer).nbFailedPublishReported = 0
-	extractor.moveEventToDLQ(ctx, msg)
-	assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	a, err = extractor.moveEventToDLQ(ctx, msg)
+	if assert.NoError(t, err) {
+		assert.Equal(t, actionContinue, a)
+		assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	}
 
 	nbPublishToFail = 3
 	nbPublishRequests = 0
 	extractor.dlqProducer.(*MockDlqProducer).nbFailedPublishReported = 0
-	extractor.moveEventToDLQ(ctx, msg)
-	assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	a, err = extractor.moveEventToDLQ(ctx, msg)
+	if assert.NoError(t, err) {
+		assert.Equal(t, actionContinue, a)
+		assert.Equal(t, nbPublishToFail+1, nbPublishRequests)
+	}
 }
 
 func TestSendToSource(t *testing.T) {
@@ -191,7 +241,7 @@ func TestSendToSource(t *testing.T) {
 	ctx := context.Background()
 	spec := GetMockSpec()
 	spec.StreamIdSuffix = "send-to-source"
-	extractor, err := createMockExtractor(spec)
+	extractor, err := createMockExtractor(false, nil, spec)
 	extractor.config.SetSendToSource(true)
 	assert.NoError(t, err)
 	err = extractor.initStreamExtract(ctx)
@@ -208,12 +258,13 @@ func TestSendToSource(t *testing.T) {
 	assert.Equal(t, string(eventBytes), string(extractor.sourceProducer.(*MockDlqProducer).lastSuccessfulEvent.Value))
 }
 
-func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
+func createMockExtractor(createTopics bool, dlqConfig *DLQConfig, spec *entity.Spec) (*Extractor, error) {
 	notifyChan := make(entity.NotifyChan, 128)
 	go handleNotificationEvents(notifyChan)
 
 	config := NewExtractorConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
 
+	config.createTopics = createTopics
 	config.SetPollTimout(2000)
 	config.SetProps(ConfigMap{
 		"prop1": "value1",
@@ -222,6 +273,11 @@ func createMockExtractor(spec *entity.Spec) (*Extractor, error) {
 	config.SetProps(ConfigMap{
 		"prop3": "value3",
 	})
+
+	if dlqConfig != nil {
+		config.SetDLQConfig(*dlqConfig)
+	}
+
 	extractor, err := NewExtractor(config)
 	extractor.SetConsumerFactory(MockConsumerFactory{})
 	extractor.SetProducerFactory(MockDlqProducerFactory{})
@@ -316,14 +372,17 @@ func reportEventWithUnretryableFailure(ctx context.Context, events []entity.Even
 	}
 }
 
-type MockAdminClient struct{}
+type MockAdminClient struct {
+	LastCreatedTopic kafka.TopicSpecification
+}
 
-func (m MockAdminClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+func (m *MockAdminClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
 	return &kafka.Metadata{}, nil
 }
 
-func (m MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.TopicSpecification, options ...kafka.CreateTopicsAdminOption) ([]kafka.TopicResult, error) {
+func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.TopicSpecification, options ...kafka.CreateTopicsAdminOption) ([]kafka.TopicResult, error) {
 	var result kafka.TopicResult
+	m.LastCreatedTopic = topics[0]
 	result.Topic = topics[0].Topic
 	return []kafka.TopicResult{result}, nil
 }
