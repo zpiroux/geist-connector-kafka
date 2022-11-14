@@ -185,7 +185,26 @@ func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Co
 	// This is currently not possible to override in stream specs
 	ec.SetCreateTopics(ef.config.CreateTopics)
 
+	if dlqEnabled(c.Spec) {
+		dlqConfig, err := gki.NewDLQConfig(c.Spec.Source.Config.DLQ.StreamIDEnrichmentPath, getDLQTopicFromSpec(ef.config.Env, c.Spec))
+		if err != nil {
+			return ec, err
+		}
+		ec.SetDLQConfig(dlqConfig)
+	}
+
 	return ec, err
+}
+
+func dlqEnabled(spec *entity.Spec) bool {
+	return spec.Ops.HandlingOfUnretryableEvents == entity.HoueDlq
+}
+
+func getDLQTopicFromSpec(env string, spec *entity.Spec) *entity.TopicSpecification {
+	if spec.Source.Config.DLQ == nil {
+		return nil
+	}
+	return topicSpecFromSpec(env, spec.Source.Config.DLQ.Topic)
 }
 
 func uniqueGroupID(groupIDSpec, extractorID, tsLayout string) string {
@@ -256,7 +275,7 @@ func (lf *loaderFactory) createKafkaLoaderConfig(c entity.Config) (*gki.Config, 
 
 	lc := gki.NewLoaderConfig(
 		c,
-		lf.topicSpecFromSpec(c.Spec.Sink.Config.Topic),
+		topicSpecFromSpec(lf.config.Env, c.Spec.Sink.Config.Topic),
 		&kafkaTopicCreationMutex,
 		sync)
 
@@ -284,14 +303,14 @@ func (lf *loaderFactory) createKafkaLoaderConfig(c entity.Config) (*gki.Config, 
 	return lc, nil
 }
 
-func (s *loaderFactory) topicSpecFromSpec(topicsInSpec []entity.SinkTopic) *entity.TopicSpecification {
+func topicSpecFromSpec(env string, topicsInSpec []entity.SinkTopic) *entity.TopicSpecification {
 	var topicSpec *entity.TopicSpecification
 	for _, topic := range topicsInSpec {
 		if topic.Env == entity.EnvironmentAll {
 			topicSpec = topic.TopicSpec
 			break
 		}
-		if string(topic.Env) == s.config.Env {
+		if string(topic.Env) == env {
 			topicSpec = topic.TopicSpec
 		}
 	}

@@ -140,8 +140,8 @@ github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415/go.mod h1:
 github.com/xeipuuv/gojsonschema v1.2.0 h1:LhYJRs+L4fBtjZUfuSZIKGeVu0QRy8e5Xi7D17UxZ74=
 github.com/xeipuuv/gojsonschema v1.2.0/go.mod h1:anYRn/JVcOK2ZgGU+IjEV4nwlhoK5sQluxsYJ78Id3Y=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
-github.com/zpiroux/geist v0.5.0 h1:i275O67+cksYQDuLpvouapw9cMNZa7B/db9Aeu52Vts=
-github.com/zpiroux/geist v0.5.0/go.mod h1:UchScdjrCOnPo23Wduw8W+sypleCRhMxtUQYBbgdJuk=
+github.com/zpiroux/geist v0.5.1 h1:s8azMPh43PmqCLU7b8NfuY+h6kUkJRXATpbMYYyPXs8=
+github.com/zpiroux/geist v0.5.1/go.mod h1:UchScdjrCOnPo23Wduw8W+sypleCRhMxtUQYBbgdJuk=
 go.opentelemetry.io/proto/otlp v0.7.0/go.mod h1:PqfVotwruBrMGOCsRd/89rSnXhoiJIqeYNgFYFoEGnI=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550/go.mod h1:yigFU9vqHzYiE8UmvKecakEJjdnWj3jj499lnFckfCI=

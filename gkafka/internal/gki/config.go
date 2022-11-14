@@ -22,6 +22,7 @@ type Config struct {
 	synchronous         bool
 	createTopics        bool
 	sendToSourceEnabled bool
+	dlqConfig           DLQConfig
 }
 
 func (c *Config) String() string {
@@ -61,6 +62,10 @@ func (c *Config) SetPollTimout(timeout int) {
 
 func (c *Config) SetCreateTopics(value bool) {
 	c.createTopics = value
+}
+
+func (c *Config) SetDLQConfig(dlqConfig DLQConfig) {
+	c.dlqConfig = dlqConfig
 }
 
 func (c *Config) SetSendToSource(value bool) {

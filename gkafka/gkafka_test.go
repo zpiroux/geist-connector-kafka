@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
 	"github.com/zpiroux/geist/entity"
@@ -17,7 +18,7 @@ func TestConfig(t *testing.T) {
 	ctx := context.Background()
 
 	// Test Extractor with empty external config
-	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnv)
+	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
 	assert.NoError(t, err)
 	config := &Config{}
 	ef := NewExtractorFactory(config)
@@ -109,6 +110,46 @@ func TestConfig(t *testing.T) {
 	assert.NoError(t, err)
 	cfgMap = loader.(*gki.Loader).KafkaConfig()
 	assert.Equal(t, expectedConfigMap, cfgMap)
+}
+
+func TestDLQConfig(t *testing.T) {
+	ctx := context.Background()
+
+	// Validate correct DLQ config created with empty external config
+	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
+	require.NoError(t, err)
+	config := &Config{}
+	ef := NewExtractorFactory(config)
+	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	assert.NoError(t, err)
+
+	dlqConfig := extractor.(*gki.Extractor).DLQConfig()
+	require.NotNil(t, dlqConfig.Topic)
+	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
+	expectedDLQTopic := entity.TopicSpecification{
+		Name:              "my.dlq.topic",
+		NumPartitions:     1,
+		ReplicationFactor: 1,
+	}
+	assert.Equal(t, &expectedDLQTopic, dlqConfig.Topic)
+
+	// Validate creating DLQ topic in custom region
+	spec, err = entity.NewSpec(kafkaToVoidStreamCustomEnvWithDLQ)
+	require.NoError(t, err)
+	config = &Config{Env: "my-custom-env", CreateTopics: true}
+	ef = NewExtractorFactory(config)
+	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	assert.NoError(t, err)
+
+	dlqConfig = extractor.(*gki.Extractor).DLQConfig()
+	require.NotNil(t, dlqConfig.Topic)
+	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
+	expectedDLQTopic = entity.TopicSpecification{
+		Name:              "my.dlq.topic",
+		NumPartitions:     24,
+		ReplicationFactor: 6,
+	}
+	assert.Equal(t, &expectedDLQTopic, dlqConfig.Topic)
 }
 
 func TestMissingGroupID(t *testing.T) {
@@ -209,7 +250,7 @@ func TestTopicNamesFromSpec(t *testing.T) {
 	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
 	assert.Equal(t, topics, []string{"foo.events"})
 
-	spec, err = entity.NewSpec(kafkaToVoidStreamCommonEnv)
+	spec, err = entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
 	assert.NoError(t, err)
 	for _, env := range envs {
 		kef.config.Env = env
@@ -226,7 +267,8 @@ func TestTopicNamesFromSpec(t *testing.T) {
 
 	lf := NewLoaderFactory(&Config{Env: envs[envProd]})
 	klf := lf.(*loaderFactory)
-	topicSpec := klf.topicSpecFromSpec(spec.Sink.Config.Topic)
+	//topicSpec := klf.topicSpecFromSpec(spec.Sink.Config.Topic)
+	topicSpec := topicSpecFromSpec(klf.config.Env, spec.Sink.Config.Topic)
 	assert.Nil(t, topicSpec)
 }
 
@@ -325,7 +367,6 @@ var (
    "source": {
       "type": "kafka",
       "config": {
-         "provider": "confluent",
          "topics": [
             {
                "env": "dev",
@@ -369,7 +410,6 @@ var (
    "source": {
       "type": "kafka",
       "config": {
-         "provider": "confluent",
          "topics": [
             {
                "env": "dev",
@@ -423,16 +463,18 @@ var (
    }
 }
 `)
-	kafkaToVoidStreamCommonEnv = []byte(`
+	kafkaToVoidStreamCommonEnvWithDLQ = []byte(`
 {
    "namespace": "geisttest",
    "streamIdSuffix": "mock-2",
    "version": 1,
    "description": "...",
+   "ops": {
+      "handlingOfUnretryableEvents": "dlq"
+   },
    "source": {
       "type": "kafka",
       "config": {
-         "provider": "confluent",
          "topics": [
             {
                "env": "all",
@@ -442,7 +484,18 @@ var (
                ]
             }
          ],
-         "properties": [
+		 "dlq": {
+			"streamIDEnrichmentPath": "_myservice.metadata.streamId",
+			"topic": [
+				{
+					"env": "all",
+					"topicSpec": {
+						"name": "my.dlq.topic"
+					}
+				}
+			]
+		 },
+		 "properties": [
             {
                "key": "group.id",
                "value": "geisttest-mock-2"
@@ -466,7 +519,6 @@ var (
    "source": {
       "type": "kafka",
       "config": {
-         "provider": "confluent",
          "topics": [
             {
                "env": "all",
@@ -484,3 +536,52 @@ var (
 }
 `)
 )
+
+var kafkaToVoidStreamCustomEnvWithDLQ = []byte(`
+{
+   "namespace": "geisttest",
+   "streamIdSuffix": "mock-2",
+   "version": 1,
+   "description": "...",
+   "ops": {
+      "handlingOfUnretryableEvents": "dlq"
+   },
+   "source": {
+      "type": "kafka",
+      "config": {
+         "topics": [
+            {
+               "env": "all",
+               "names": [
+                  "foo.events",
+                  "bar.events"
+               ]
+            }
+         ],
+		 "dlq": {
+			"streamIDEnrichmentPath": "_myservice.metadata.streamId",
+			"topic": [
+				{
+					"env": "my-custom-env",
+					"topicSpec": {
+						"name": "my.dlq.topic",
+						"numPartitions": 24,
+						"replicationFactor": 6
+					}
+				}
+			]
+		 },
+		 "properties": [
+            {
+               "key": "group.id",
+               "value": "geisttest-mock-2"
+            }
+         ]
+      }
+   },
+   "transform": {},
+   "sink": {
+      "type": "void"
+   }
+}
+`)
