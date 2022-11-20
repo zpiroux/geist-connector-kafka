@@ -86,7 +86,7 @@ func (e *Extractor) StreamExtract(
 		msgs   []*kafka.Message
 	)
 
-	e.notifier.Notify(entity.NotifyLevelInfo, "stream extract starting up with ops: %+v, config %s", e.config.c.Spec.Ops, e.config)
+	e.notifier.Notify(entity.NotifyLevelInfo, "StreamExtract starting up with ops: %+v, config %s", e.config.c.Spec.Ops, e.config)
 	defer e.closeStreamExtract()
 
 	*retryable = true
@@ -103,7 +103,7 @@ func (e *Extractor) StreamExtract(
 		event := e.consumer.Poll(e.config.pollTimeoutMs)
 
 		if ctx.Err() == context.Canceled {
-			e.notifier.Notify(entity.NotifyLevelInfo, "context canceled in StreamExtract")
+			e.notifier.Notify(entity.NotifyLevelInfo, "Context canceled in StreamExtract")
 			*retryable = false
 			return
 		}
@@ -113,9 +113,9 @@ func (e *Extractor) StreamExtract(
 			if e.config.c.Spec.Ops.MicroBatch {
 				// Poll timeout events are used to check if the microbatch window has closed and therefore if
 				// event batch should be sent to downstream processing.
-				if len(events) > 0 && microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimoutMs) {
+				if len(events) > 0 && microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimeoutMs) {
 					if e.config.c.Spec.Ops.LogEventData {
-						e.notifier.Notify(entity.NotifyLevelInfo, "microbatch window timed out (started: %v), processing unfilled batch of %d events", microBatchStart, len(events))
+						e.notifier.Notify(entity.NotifyLevelInfo, "Microbatch window timed out (started: %v), processing unfilled batch of %d events", microBatchStart, len(events))
 					}
 					switch e.handleEventProcessingResult(ctx, msgs, reportEvent(ctx, events), err, retryable) {
 					case actionShutdown:
@@ -137,7 +137,7 @@ func (e *Extractor) StreamExtract(
 			if evt.TopicPartition.Error != nil {
 				// This should be a producer-only error. Might have received this here long ago, so keep for logging purposes.
 				*err = evt.TopicPartition.Error
-				e.notifier.Notify(entity.NotifyLevelError, "topic partition error when consuming message, msg: %+v, msg value: %s, err: %s", evt, string(evt.Value), *err)
+				e.notifier.Notify(entity.NotifyLevelError, "Topic partition error when consuming message, msg: %+v, msg value: %s, err: %s", evt, string(evt.Value), *err)
 
 				// Using normal event processing for this undocumented behaviour
 				// Alternatively, switch to 'continue' here, depending on test results.
@@ -161,11 +161,11 @@ func (e *Extractor) StreamExtract(
 				})
 				if len(events) < e.config.c.Spec.Ops.MicroBatchSize &&
 					microBatchBytes < e.config.c.Spec.Ops.MicroBatchBytes &&
-					!microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimoutMs) {
+					!microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimeoutMs) {
 					continue
 				}
 				if e.config.c.Spec.Ops.LogEventData {
-					e.notifier.Notify(entity.NotifyLevelInfo, "microbatch full, nb events: %d, bytes: %d", len(events), microBatchBytes)
+					e.notifier.Notify(entity.NotifyLevelInfo, "Microbatch full, nb events: %d, bytes: %d", len(events), microBatchBytes)
 				}
 
 			} else {
@@ -224,14 +224,14 @@ func (e *Extractor) handleEventProcessingResult(
 
 	case entity.ExecutorStatusSuccessful:
 		if result.Error != nil {
-			e.notifier.Notify(entity.NotifyLevelError, "bug in executor, shutting down, result.Error should be nil if ExecutorStatusSuccessful, result: %+v", result)
+			e.notifier.Notify(entity.NotifyLevelError, "Bug in executor, shutting down, result.Error should be nil if ExecutorStatusSuccessful, result: %+v", result)
 			return actionShutdown
 		}
 		*err = e.storeOffsets(msgs)
 		return actionContinue
 
 	case entity.ExecutorStatusShutdown:
-		e.notifier.Notify(entity.NotifyLevelWarn, "shutting down Extractor due to executor shutdown, reportEvent result: %+v", result)
+		e.notifier.Notify(entity.NotifyLevelWarn, "Shutting down Extractor due to executor shutdown, reportEvent result: %+v", result)
 		return actionShutdown
 
 	case entity.ExecutorStatusRetriesExhausted:
@@ -257,7 +257,7 @@ func (e *Extractor) handleEventProcessingResult(
 		case entity.HoueDefault:
 			fallthrough
 		case entity.HoueDiscard:
-			e.notifier.Notify(entity.NotifyLevelWarn, "a Kafka event failed downstream processing with result %+v; "+
+			e.notifier.Notify(entity.NotifyLevelWarn, "A Kafka event failed downstream processing with result %+v; "+
 				" since this stream (%s) does not have DLQ enabled, the event will now be discarded, events: %+v",
 				result, e.config.c.Spec.Id(), msgs)
 			*err = e.storeOffsets(msgs)
@@ -308,9 +308,9 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 
 func (e *Extractor) closeStreamExtract() {
 	if !isNil(e.consumer) {
-		e.notifier.Notify(entity.NotifyLevelInfo, "closing Kafka consumer %+v, consumed events: %d", e.consumer, e.eventCount)
+		e.notifier.Notify(entity.NotifyLevelInfo, "Closing Kafka consumer %+v, consumed events: %d", e.consumer, e.eventCount)
 		if err := e.consumer.Close(); err != nil {
-			e.notifier.Notify(entity.NotifyLevelError, "error closing Kafka consumer, err: %v", err)
+			e.notifier.Notify(entity.NotifyLevelError, "Error closing Kafka consumer, err: %v", err)
 		} else {
 			e.notifier.Notify(entity.NotifyLevelInfo, "Kafka consumer %+v closed successfully", e.consumer)
 		}
@@ -318,7 +318,6 @@ func (e *Extractor) closeStreamExtract() {
 	if !isNil(e.dlqProducer) {
 		e.dlqProducer.Close()
 	}
-	e.notifier.Notify(entity.NotifyLevelInfo, "terminated")
 }
 
 func (e *Extractor) Extract(
@@ -385,7 +384,7 @@ func (e *Extractor) SendToSource(ctx context.Context, eventData any) (string, er
 			return "", fmt.Errorf("kafka error in SendToSource producer, code: %v, event: %v", srcMsg.Code(), srcMsg)
 
 		default:
-			e.notifier.Notify(entity.NotifyLevelWarn, "unexpected Kafka info event in SendToSource, %+v, waiting for proper event response", srcMsg)
+			e.notifier.Notify(entity.NotifyLevelWarn, "Unexpected Kafka info event in SendToSource, %+v, waiting for proper event response", srcMsg)
 		}
 	}
 
@@ -430,7 +429,7 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 	}
 
 	if e.config.c.Spec.Ops.LogEventData {
-		e.notifier.Notify(entity.NotifyLevelDebug, "storing offsets for events: %v, offsets: %v", msgs, offsets)
+		e.notifier.Notify(entity.NotifyLevelDebug, "Storing offsets for events: %v, offsets: %v", msgs, offsets)
 	}
 	offsets, err := e.consumer.StoreOffsets(offsets)
 
@@ -444,7 +443,7 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 		// total number across all pods is closer to the number of topic partitions,
 		// and change from Kafka's default partition assignment strategy to cooperative
 		// sticky.
-		e.notifier.Notify(entity.NotifyLevelError, "error storing offsets, event: %+v, tp: %v, err: %v", msgs, offsets, err)
+		e.notifier.Notify(entity.NotifyLevelError, "Error storing offsets, event: %+v, tp: %v, err: %v", msgs, offsets, err)
 	}
 	return err
 }
