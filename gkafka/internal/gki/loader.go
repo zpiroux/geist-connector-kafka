@@ -109,19 +109,17 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 func (l *Loader) Shutdown(ctx context.Context) {
 	l.sm.Lock()
 	defer l.sm.Unlock()
-	l.notifier.Notify(entity.NotifyLevelInfo, "shutdown initiated")
+	l.notifier.Notify(entity.NotifyLevelDebug, "Shutdown initiated")
 	if l.producer != nil {
 		if unflushed := l.producer.Flush(flushTimeoutSec * 1000); unflushed > 0 {
-			l.notifier.Notify(entity.NotifyLevelError, "%d messages did not get flushed during shutdown, check for potential message loss", unflushed)
-		} else {
-			l.notifier.Notify(entity.NotifyLevelInfo, "all messages flushed")
+			l.notifier.Notify(entity.NotifyLevelError, "%d messages did not get flushed during shutdown, check for potential inconsistencies", unflushed)
 		}
 		if l.shutdownDeliveryReportHandler != nil {
 			l.shutdownDeliveryReportHandler()
 		}
 		l.producer.Close()
 		l.producer = nil
-		l.notifier.Notify(entity.NotifyLevelInfo, "shutdown completed, number of published events: %d", l.eventCount)
+		l.notifier.Notify(entity.NotifyLevelInfo, "Shutdown completed, number of published events: %d", l.eventCount)
 	}
 }
 
@@ -152,7 +150,7 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 	)
 
 	if l.config.c.Spec.Ops.LogEventData {
-		l.notifier.Notify(entity.NotifyLevelDebug, "sending event %+v with producer: %+v", string(m.Value), l.producer)
+		l.notifier.Notify(entity.NotifyLevelDebug, "Sending event %+v with producer: %+v", string(m.Value), l.producer)
 	}
 
 	start := time.Now()
@@ -161,7 +159,7 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 	if !l.config.synchronous {
 		if l.config.c.Spec.Ops.LogEventData {
 			duration := time.Since(start)
-			l.notifier.Notify(entity.NotifyLevelInfo, "event enqueued async [duration: %v] with err: %v", duration, err)
+			l.notifier.Notify(entity.NotifyLevelInfo, "Event enqueued async [duration: %v] with err: %v", duration, err)
 		}
 		return resourceId, err, true
 	}
@@ -177,7 +175,7 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 				l.eventCount++
 				if l.config.c.Spec.Ops.LogEventData {
 					duration := time.Since(start)
-					l.notifier.Notify(entity.NotifyLevelInfo, "event published [duration: %v] to %s [%d] at offset: %v, key: %v value: %s",
+					l.notifier.Notify(entity.NotifyLevelInfo, "Event published [duration: %v] to %s [%d] at offset: %v, key: %v value: %s",
 						duration, *msg.TopicPartition.Topic, msg.TopicPartition.Partition,
 						msg.TopicPartition.Offset, string(msg.Key), string(msg.Value))
 				}
@@ -196,7 +194,7 @@ func (l *Loader) publishMessage(ctx context.Context, m *kafka.Message) (string, 
 			retryable = true
 		}
 	} else {
-		l.notifier.Notify(entity.NotifyLevelError, "kafka.producer.Produce() failed with err: %v, msg: %+v, topic: %s", err, m, l.config.topics[0])
+		l.notifier.Notify(entity.NotifyLevelError, "kafka.producer.Produce() failed with err: %v, msg: %+v, topic: %s. Operation will be retried.", err, m, l.config.topics[0])
 		retryable = true // Treat all these kinds of errors as retryable for now
 	}
 
@@ -267,15 +265,15 @@ func (l *Loader) createTopic(ctx context.Context, topicSpec *entity.TopicSpecifi
 	res, err := l.ac.CreateTopics(ctx, []kafka.TopicSpecification{topic})
 
 	if err == nil {
-		l.notifier.Notify(entity.NotifyLevelInfo, "topic created: %+v", res)
+		l.notifier.Notify(entity.NotifyLevelInfo, "Topic created: %+v", res)
 		return nil
 	}
 
 	if err.Error() == kafka.ErrTopicAlreadyExists.String() {
-		l.notifier.Notify(entity.NotifyLevelInfo, "topic %s for this stream already exists", topicSpec.Name)
+		l.notifier.Notify(entity.NotifyLevelInfo, "Topic %s for this stream already exists", topicSpec.Name)
 		err = nil
 	} else {
-		l.notifier.Notify(entity.NotifyLevelError, "could not create topic with spec: %+v, err: %v", topic, err)
+		l.notifier.Notify(entity.NotifyLevelError, "Could not create topic with spec: %+v, err: %v", topic, err)
 	}
 
 	return err
