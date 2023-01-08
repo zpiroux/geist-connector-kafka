@@ -16,6 +16,11 @@ import (
 	"github.com/zpiroux/geist/entity"
 )
 
+const (
+	MockSpecID2 = "geisttest-mock-2"
+	MockSpecID3 = "geisttest-mock-3"
+)
+
 func TestConfig(t *testing.T) {
 	ctx := context.Background()
 
@@ -30,7 +35,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     DefaultMaxPollInterval,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		PropGroupID:             "geisttest-mock-2",
+		PropGroupID:             MockSpecID3,
 	}
 	assert.Equal(t, expectedConfigMap, cfgMap)
 
@@ -56,7 +61,7 @@ func TestConfig(t *testing.T) {
 		PropMaxPollInterval:     200000,
 		gki.PropAutoOffsetStore: false,
 		gki.PropAutoCommit:      true,
-		PropGroupID:             "geisttest-mock-2",
+		PropGroupID:             MockSpecID3,
 		PropBootstrapServers:    "mybootstrapserver",
 		PropSASLUsername:        "myusername",
 		PropSASLPassword:        "mypassword",
@@ -229,7 +234,7 @@ func TestGeistIntegration(t *testing.T) {
 	go func() {
 		streamId, err := geist.RegisterStream(ctx, kafkaToKafkaDevOnly)
 		assert.NoError(t, err)
-		assert.Equal(t, "geisttest-mock-2", streamId)
+		assert.Equal(t, MockSpecID2, streamId)
 		err = geist.Shutdown(ctx)
 		assert.NoError(t, err)
 	}()
@@ -443,7 +448,7 @@ var (
          "properties": [
             {
                "key": "group.id",
-               "value": "geisttest-mock-1"
+               "value": "geisttest-mock-2"
             }
          ]
       }
@@ -520,7 +525,7 @@ var (
 		 "properties": [
             {
                "key": "group.id",
-               "value": "geisttest-mock-2"
+               "value": "geisttest-mock-3"
             }
          ]
       }
@@ -600,7 +605,7 @@ var kafkaToVoidStreamCustomEnvWithDLQ = []byte(`
             "properties": [
                 {
                     "key": "group.id",
-                    "value": "geisttest-mock-2"
+                    "value": "geisttest-mock-5"
                 }
             ]
         }
