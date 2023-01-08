@@ -2,11 +2,13 @@ package gkafka
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist"
@@ -150,6 +152,36 @@ func TestDLQConfig(t *testing.T) {
 		ReplicationFactor: 6,
 	}
 	assert.Equal(t, &expectedDLQTopic, dlqConfig.Topic)
+
+	// Validate config of fully created DLQ producer
+	config = &Config{Env: "my-custom-env", CreateTopics: false}
+	ef = NewExtractorFactory(config)
+	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	producerFactory := &MockDlqProducerFactory{}
+	extractor.(*gki.Extractor).SetProducerFactory(producerFactory)
+	var retryable bool
+	ctx, cancel := context.WithCancel(ctx)
+	cancel() // We use a closed ctx to return early from StreamExtract
+	extractor.StreamExtract(ctx, nil, &err, &retryable)
+	assert.NoError(t, err)
+	var pconf = []byte(`
+	{
+	  "queue.buffering.max.messages": 100,
+	  "queue.buffering.max.kbytes":   12345,
+	  "compression.type":             "lz4",
+	  "enable.idempotence":           true
+	}`)
+
+	var expectedProducerConfig kafka.ConfigMap
+	err = json.Unmarshal(pconf, &expectedProducerConfig)
+	require.NoError(t, err)
+	assertMapEqual(t, expectedProducerConfig, *producerFactory.Producer.Conf)
+}
+
+func assertMapEqual(t *testing.T, m1, m2 kafka.ConfigMap) {
+	for k, v := range m1 {
+		assert.Equal(t, v, m2[k])
+	}
 }
 
 func TestMissingGroupID(t *testing.T) {
@@ -539,49 +571,107 @@ var (
 
 var kafkaToVoidStreamCustomEnvWithDLQ = []byte(`
 {
-   "namespace": "geisttest",
-   "streamIdSuffix": "mock-2",
-   "version": 1,
-   "description": "...",
-   "ops": {
-      "handlingOfUnretryableEvents": "dlq"
-   },
-   "source": {
-      "type": "kafka",
-      "config": {
-         "topics": [
-            {
-               "env": "all",
-               "names": [
-                  "foo.events",
-                  "bar.events"
-               ]
-            }
-         ],
-		 "dlq": {
-			"streamIDEnrichmentPath": "_myservice.metadata.streamId",
-			"topic": [
-				{
-					"env": "my-custom-env",
-					"topicSpec": {
-						"name": "my.dlq.topic",
-						"numPartitions": 24,
-						"replicationFactor": 6
-					}
-				}
-			]
-		 },
-		 "properties": [
-            {
-               "key": "group.id",
-               "value": "geisttest-mock-2"
-            }
-         ]
-      }
-   },
-   "transform": {},
-   "sink": {
-      "type": "void"
-   }
+    "namespace": "geisttest",
+    "streamIdSuffix": "mock-2",
+    "version": 1,
+    "description": "...",
+    "ops": {
+        "handlingOfUnretryableEvents": "dlq"
+    },
+    "source": {
+        "type": "kafka",
+        "config": {
+            "topics": [
+                {
+                    "env": "all",
+                    "names": [
+                        "foo.events",
+                        "bar.events"
+                    ]
+                }
+            ],
+            "dlq": {
+                "streamIDEnrichmentPath": "_myservice.metadata.streamId",
+                "producerConfig": {
+                    "queue.buffering.max.messages": 100,
+                    "queue.buffering.max.kbytes": 12345
+                },
+                "topic": [
+                    {
+                        "env": "my-custom-env",
+                        "topicSpec": {
+                            "name": "my.dlq.topic",
+                            "numPartitions": 24,
+                            "replicationFactor": 6
+                        }
+                    }
+                ]
+            },
+            "properties": [
+                {
+                    "key": "group.id",
+                    "value": "geisttest-mock-2"
+                }
+            ]
+        }
+    },
+    "transform": {},
+    "sink": {
+        "type": "void"
+    }
 }
 `)
+
+type MockDlqProducerFactory struct {
+	Producer *MockDlqProducer
+}
+
+func (mpf *MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (gki.Producer, error) {
+	mpf.Producer = NewMockDlqProducer(conf)
+	return mpf.Producer, nil
+}
+
+func (mpf *MockDlqProducerFactory) NewAdminClientFromProducer(p gki.Producer) (gki.AdminClient, error) {
+	return &MockAdminClient{}, nil
+}
+
+func NewMockDlqProducer(conf *kafka.ConfigMap) *MockDlqProducer {
+	return &MockDlqProducer{
+		Conf: conf,
+	}
+}
+
+type MockDlqProducer struct {
+	Conf *kafka.ConfigMap
+}
+
+func (p *MockDlqProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
+	return nil
+}
+
+func (p *MockDlqProducer) Events() (ch chan kafka.Event) {
+	return ch
+}
+
+func (p *MockDlqProducer) Flush(timeoutMs int) int {
+	return 0
+}
+
+func (p *MockDlqProducer) Close() {
+	// Nothing to close
+}
+
+type MockAdminClient struct {
+	LastCreatedTopic kafka.TopicSpecification
+}
+
+func (m *MockAdminClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+	return &kafka.Metadata{}, nil
+}
+
+func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.TopicSpecification, options ...kafka.CreateTopicsAdminOption) ([]kafka.TopicResult, error) {
+	var result kafka.TopicResult
+	m.LastCreatedTopic = topics[0]
+	result.Topic = topics[0].Topic
+	return []kafka.TopicResult{result}, nil
+}

@@ -94,12 +94,21 @@ func (c *Config) SetLoaderProps(props ConfigMap) {
 }
 
 var commonConsumerProps = map[string]bool{
-	"group.id":                   true,
-	"session.timeout.ms":         true,
-	"max.poll.interval.ms":       true,
-	"enable.auto.commit":         true,
-	"enable.auto.offset.store":   true,
-	"queued.max.messages.kbytes": true,
+	"group.id":                      true,
+	"session.timeout.ms":            true,
+	"max.poll.interval.ms":          true,
+	"enable.auto.commit":            true,
+	"auto.commit.interval.ms":       true,
+	"enable.auto.offset.store":      true,
+	"queued.min.messages":           true,
+	"queued.max.messages.kbytes":    true,
+	"fetch.wait.max.ms":             true,
+	"fetch.message.max.bytes":       true,
+	"max.partition.fetch.bytes":     true,
+	"fetch.min.bytes":               true,
+	"fetch.max.bytes":               true,
+	"isolation.level":               true,
+	"partition.assignment.strategy": true,
 }
 
 func displayConfig(in ConfigMap) ConfigMap {
