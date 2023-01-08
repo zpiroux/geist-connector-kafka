@@ -22,10 +22,7 @@ func TestConfig(t *testing.T) {
 	// Test Extractor with empty external config
 	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
 	assert.NoError(t, err)
-	config := &Config{}
-	ef := NewExtractorFactory(config)
-	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
-	assert.NoError(t, err)
+	extractor := createExtractor(t, ctx, spec, &Config{})
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
 	expectedConfigMap := map[string]any{
@@ -38,7 +35,7 @@ func TestConfig(t *testing.T) {
 	assert.Equal(t, expectedConfigMap, cfgMap)
 
 	// Test Extractor with non-empty external config
-	config = &Config{
+	config := &Config{
 		PollTimeoutMs: 27000,
 		KafkaProps: map[string]any{
 			PropBootstrapServers:    "mybootstrapserver",
@@ -51,9 +48,7 @@ func TestConfig(t *testing.T) {
 			gki.PropAutoCommit:      false,
 		},
 	}
-	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
-	assert.NoError(t, err)
+	extractor = createExtractor(t, ctx, spec, config)
 	pollTimeout, cfgMap = extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, 27000, pollTimeout)
 	expectedConfigMap = map[string]any{
@@ -120,11 +115,8 @@ func TestDLQConfig(t *testing.T) {
 	// Validate correct DLQ config created with empty external config
 	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
 	require.NoError(t, err)
-	config := &Config{}
-	ef := NewExtractorFactory(config)
-	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
-	assert.NoError(t, err)
 
+	extractor := createExtractor(t, ctx, spec, &Config{})
 	dlqConfig := extractor.(*gki.Extractor).DLQConfig()
 	require.NotNil(t, dlqConfig.Topic)
 	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
@@ -138,11 +130,7 @@ func TestDLQConfig(t *testing.T) {
 	// Validate creating DLQ topic in custom region
 	spec, err = entity.NewSpec(kafkaToVoidStreamCustomEnvWithDLQ)
 	require.NoError(t, err)
-	config = &Config{Env: "my-custom-env", CreateTopics: true}
-	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
-	assert.NoError(t, err)
-
+	extractor = createExtractor(t, ctx, spec, &Config{Env: "my-custom-env", CreateTopics: true})
 	dlqConfig = extractor.(*gki.Extractor).DLQConfig()
 	require.NotNil(t, dlqConfig.Topic)
 	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
@@ -154,9 +142,7 @@ func TestDLQConfig(t *testing.T) {
 	assert.Equal(t, &expectedDLQTopic, dlqConfig.Topic)
 
 	// Validate config of fully created DLQ producer
-	config = &Config{Env: "my-custom-env", CreateTopics: false}
-	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
+	extractor = createExtractor(t, ctx, spec, &Config{Env: "my-custom-env", CreateTopics: false})
 	producerFactory := &MockDlqProducerFactory{}
 	extractor.(*gki.Extractor).SetProducerFactory(producerFactory)
 	var retryable bool
@@ -176,6 +162,13 @@ func TestDLQConfig(t *testing.T) {
 	err = json.Unmarshal(pconf, &expectedProducerConfig)
 	require.NoError(t, err)
 	assertMapEqual(t, expectedProducerConfig, *producerFactory.Producer.Conf)
+}
+
+func createExtractor(t *testing.T, ctx context.Context, spec *entity.Spec, config *Config) entity.Extractor {
+	ef := NewExtractorFactory(config)
+	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
+	require.NoError(t, err)
+	return extractor
 }
 
 func assertMapEqual(t *testing.T, m1, m2 kafka.ConfigMap) {
@@ -209,9 +202,7 @@ func TestUniqueGroupID(t *testing.T) {
 	ctx := context.Background()
 	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
 	assert.NoError(t, err)
-	ef := NewExtractorFactory(&Config{Env: envs[envProd]})
-	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
-	assert.NoError(t, err)
+	extractor := createExtractor(t, ctx, spec, &Config{Env: envs[envProd]})
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
 	assert.True(t, strings.Contains(cfgMap[PropGroupID].(string), "my-groupid-prefix-some-ID-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap[PropGroupID])
@@ -299,7 +290,6 @@ func TestTopicNamesFromSpec(t *testing.T) {
 
 	lf := NewLoaderFactory(&Config{Env: envs[envProd]})
 	klf := lf.(*loaderFactory)
-	//topicSpec := klf.topicSpecFromSpec(spec.Sink.Config.Topic)
 	topicSpec := topicSpecFromSpec(klf.config.Env, spec.Sink.Config.Topic)
 	assert.Nil(t, topicSpec)
 }
