@@ -24,7 +24,7 @@ func TestConfig(t *testing.T) {
 	assert.NoError(t, err)
 	config := &Config{}
 	ef := NewExtractorFactory(config)
-	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "someId"})
+	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
@@ -52,7 +52,7 @@ func TestConfig(t *testing.T) {
 		},
 	}
 	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "someId"})
+	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	pollTimeout, cfgMap = extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, 27000, pollTimeout)
@@ -76,7 +76,7 @@ func TestConfig(t *testing.T) {
 		Env: "dev",
 	}
 	lf := NewLoaderFactory(config)
-	loader, err := lf.NewLoader(ctx, entity.Config{Spec: spec, ID: "someId"})
+	loader, err := lf.NewLoader(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	expectedConfigMap = map[string]any{
 		PropIdempotence:     true,
@@ -108,7 +108,7 @@ func TestConfig(t *testing.T) {
 		"client.id":          "geisttest_mock-1",
 	}
 	lf = NewLoaderFactory(config)
-	loader, err = lf.NewLoader(ctx, entity.Config{Spec: spec, ID: "someId"})
+	loader, err = lf.NewLoader(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	cfgMap = loader.(*gki.Loader).KafkaConfig()
 	assert.Equal(t, expectedConfigMap, cfgMap)
@@ -122,7 +122,7 @@ func TestDLQConfig(t *testing.T) {
 	require.NoError(t, err)
 	config := &Config{}
 	ef := NewExtractorFactory(config)
-	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 
 	dlqConfig := extractor.(*gki.Extractor).DLQConfig()
@@ -140,7 +140,7 @@ func TestDLQConfig(t *testing.T) {
 	require.NoError(t, err)
 	config = &Config{Env: "my-custom-env", CreateTopics: true}
 	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 
 	dlqConfig = extractor.(*gki.Extractor).DLQConfig()
@@ -156,7 +156,7 @@ func TestDLQConfig(t *testing.T) {
 	// Validate config of fully created DLQ producer
 	config = &Config{Env: "my-custom-env", CreateTopics: false}
 	ef = NewExtractorFactory(config)
-	extractor, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-ID"})
+	extractor, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
 	producerFactory := &MockDlqProducerFactory{}
 	extractor.(*gki.Extractor).SetProducerFactory(producerFactory)
 	var retryable bool
@@ -189,7 +189,7 @@ func TestMissingGroupID(t *testing.T) {
 	spec, err := entity.NewSpec(kafkaToVoidMissingGroupID)
 	assert.NoError(t, err)
 	ef := NewExtractorFactory(&Config{})
-	_, err = ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-id"})
+	_, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.True(t, errors.Is(err, ErrMissingGroupID))
 }
 
@@ -210,11 +210,11 @@ func TestUniqueGroupID(t *testing.T) {
 	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
 	assert.NoError(t, err)
 	ef := NewExtractorFactory(&Config{Env: envs[envProd]})
-	extractor, err := ef.NewExtractor(ctx, entity.Config{Spec: spec, ID: "some-id"})
+	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	pollTimeout, cfgMap := extractor.(*gki.Extractor).KafkaConfig()
 	assert.Equal(t, gki.DefaultPollTimeoutMs, pollTimeout)
-	assert.True(t, strings.Contains(cfgMap[PropGroupID].(string), "my-groupid-prefix-some-id-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap[PropGroupID])
+	assert.True(t, strings.Contains(cfgMap[PropGroupID].(string), "my-groupid-prefix-some-ID-"+time.Now().UTC().Format(tsLayout)), "generated groupId: %s", cfgMap[PropGroupID])
 }
 
 func TestGeistIntegration(t *testing.T) {
@@ -621,6 +621,10 @@ var kafkaToVoidStreamCustomEnvWithDLQ = []byte(`
     }
 }
 `)
+
+func NewEntityConfig(spec *entity.Spec) entity.Config {
+	return entity.Config{Spec: spec, ID: "some-ID"}
+}
 
 type MockDlqProducerFactory struct {
 	Producer *MockDlqProducer
