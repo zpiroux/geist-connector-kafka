@@ -167,7 +167,7 @@ func TestDLQConfig(t *testing.T) {
 func createExtractor(t *testing.T, ctx context.Context, spec *entity.Spec, config *Config) entity.Extractor {
 	ef := NewExtractorFactory(config)
 	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	return extractor
 }
 
@@ -229,7 +229,7 @@ func TestGeistIntegration(t *testing.T) {
 	go func() {
 		streamId, err := geist.RegisterStream(ctx, kafkaToKafkaDevOnly)
 		assert.NoError(t, err)
-		assert.Equal(t, "geisttest-mock-1", streamId)
+		assert.Equal(t, "geisttest-mock-2", streamId)
 		err = geist.Shutdown(ctx)
 		assert.NoError(t, err)
 	}()
@@ -426,7 +426,7 @@ var (
 	kafkaToKafkaDevOnly = []byte(`
 {
    "namespace": "geisttest",
-   "streamIdSuffix": "mock-1",
+   "streamIdSuffix": "mock-2",
    "version": 1,
    "description": "...",
    "source": {
@@ -488,7 +488,7 @@ var (
 	kafkaToVoidStreamCommonEnvWithDLQ = []byte(`
 {
    "namespace": "geisttest",
-   "streamIdSuffix": "mock-2",
+   "streamIdSuffix": "mock-3",
    "version": 1,
    "description": "...",
    "ops": {
@@ -535,7 +535,7 @@ var (
 	kafkaToVoidMissingGroupID = []byte(`
 {
    "namespace": "geisttest",
-   "streamIdSuffix": "mock-3",
+   "streamIdSuffix": "mock-4",
    "version": 1,
    "description": "...",
    "source": {
@@ -562,7 +562,7 @@ var (
 var kafkaToVoidStreamCustomEnvWithDLQ = []byte(`
 {
     "namespace": "geisttest",
-    "streamIdSuffix": "mock-2",
+    "streamIdSuffix": "mock-5",
     "version": 1,
     "description": "...",
     "ops": {
