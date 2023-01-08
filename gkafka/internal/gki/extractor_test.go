@@ -332,7 +332,7 @@ func (mcf MockConsumerFactory) NewAdminClientFromConsumer(c Consumer) (AdminClie
 type MockDlqProducerFactory struct{}
 
 func (mpf MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, error) {
-	return NewMockDlqProducer(), nil
+	return NewMockDlqProducer(conf), nil
 }
 
 func (mpf MockDlqProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
@@ -387,13 +387,15 @@ func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.Topic
 	return []kafka.TopicResult{result}, nil
 }
 
-func NewMockDlqProducer() Producer {
-	p := &MockDlqProducer{}
-	p.events = make(chan kafka.Event, 10)
-	return p
+func NewMockDlqProducer(conf *kafka.ConfigMap) Producer {
+	return &MockDlqProducer{
+		events: make(chan kafka.Event, 10),
+		conf:   conf,
+	}
 }
 
 type MockDlqProducer struct {
+	conf                    *kafka.ConfigMap
 	events                  chan kafka.Event
 	nbFailedPublishReported int
 	lastSuccessfulEvent     *kafka.Message

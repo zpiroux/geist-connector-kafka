@@ -18,7 +18,7 @@ const (
 	dlqTopicReplicationFactor   = 3
 )
 
-func NewDLQConfig(enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
+func NewDLQConfig(pconf map[string]any, enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
 	var dlq DLQConfig
 	if topic == nil {
 		return dlq, errors.New("invalid DLQ config provided in stream spec")
@@ -29,6 +29,7 @@ func NewDLQConfig(enrichPath string, topic *entity.TopicSpecification) (DLQConfi
 	}
 
 	dlq.Topic = topic
+	dlq.ProducerConfig = pconf
 	dlq.StreamIDEnrichmentPath = enrichPath
 	return dlq, nil
 }
@@ -39,6 +40,8 @@ type DLQConfig struct {
 	// NumPartitions and ReplicationFactor will be used as well if the topic is created
 	// (if it doesn't exist already).
 	Topic *entity.TopicSpecification
+
+	ProducerConfig map[string]any
 
 	// If StreamIDEnrichmentPath is not empty it specifies the JSON path (e.g.
 	// "my.enrichment.streamId") including the JSON field name, which will hold the
@@ -108,7 +111,7 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 	var err error
 	kconfig := make(kafka.ConfigMap)
 
-	// Add producer specific props, overridable by the stream spec
+	// Add producer specific default props, overridable by the stream spec
 	kconfig["enable.idempotence"] = true
 	kconfig["compression.type"] = "lz4"
 
@@ -116,6 +119,10 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 		if _, ok := commonConsumerProps[k]; ok {
 			continue
 		}
+		kconfig[k] = v
+	}
+
+	for k, v := range e.config.dlqConfig.ProducerConfig {
 		kconfig[k] = v
 	}
 

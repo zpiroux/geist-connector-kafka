@@ -186,7 +186,10 @@ func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Co
 	ec.SetCreateTopics(ef.config.CreateTopics)
 
 	if dlqEnabled(c.Spec) {
-		dlqConfig, err := gki.NewDLQConfig(c.Spec.Source.Config.DLQ.StreamIDEnrichmentPath, getDLQTopicFromSpec(ef.config.Env, c.Spec))
+		dlqConfig, err := gki.NewDLQConfig(
+			c.Spec.Source.Config.DLQ.ProducerConfig,
+			c.Spec.Source.Config.DLQ.StreamIDEnrichmentPath,
+			getDLQTopicFromSpec(ef.config.Env, c.Spec))
 		if err != nil {
 			return ec, err
 		}
