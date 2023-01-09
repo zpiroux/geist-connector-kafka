@@ -97,6 +97,11 @@ const (
 const (
 	entityTypeId          = "kafka"
 	timestampLayoutMicros = "2006-01-02T15.04.05.000000Z"
+
+	// useSharedDLQProducer is an internal feature flag specifying if the default behaviour
+	// when creating DLQ producers should be to share the producer for all extractors/streams
+	// instances per stream ID.
+	useSharedDLQProducer = true
 )
 
 // kafkaTopicCreationMutex reduces the amount of unneeded requests for certain stream
@@ -114,11 +119,13 @@ var kafkaTopicCreationMutex sync.Mutex
 // extractorFactory is a singleton enabling extractors/sources to be handled as plug-ins to Geist
 type extractorFactory struct {
 	config *Config
+	pfs    map[string]*gki.SharedProducerFactory
 }
 
 func NewExtractorFactory(config *Config) entity.ExtractorFactory {
 	return &extractorFactory{
 		config: config,
+		pfs:    make(map[string]*gki.SharedProducerFactory),
 	}
 }
 
@@ -126,12 +133,26 @@ func (ef *extractorFactory) SourceId() string {
 	return entityTypeId
 }
 
+// NewExtractor is called from the same single goroutine (Supervisor) so no need to protect
+// shared resource checks with a mutex.
 func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
 	cfg, err := ef.createKafkaExtractorConfig(c)
 	if err != nil {
 		return nil, err
 	}
-	return gki.NewExtractor(cfg)
+
+	e, err := gki.NewExtractor(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if useSharedDLQProducer {
+		if _, found := ef.pfs[c.Spec.Id()]; !found {
+			ef.pfs[c.Spec.Id()] = gki.NewSharedProducerFactory()
+		}
+		e.SetProducerFactory(ef.pfs[c.Spec.Id()])
+	}
+	return e, nil
 }
 
 func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Config, error) {
