@@ -99,6 +99,7 @@ var commonConsumerProps = map[string]bool{
 	"max.poll.interval.ms":          true,
 	"enable.auto.commit":            true,
 	"auto.commit.interval.ms":       true,
+	"auto.offset.reset":             true,
 	"enable.auto.offset.store":      true,
 	"queued.min.messages":           true,
 	"queued.max.messages.kbytes":    true,
