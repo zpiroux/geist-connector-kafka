@@ -307,7 +307,7 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 }
 
 func (e *Extractor) closeStreamExtract() {
-	if !isNil(e.consumer) {
+	if !IsNil(e.consumer) {
 		e.notifier.Notify(entity.NotifyLevelInfo, "Closing Kafka consumer %+v, consumed events: %d", e.consumer, e.eventCount)
 		if err := e.consumer.Close(); err != nil {
 			e.notifier.Notify(entity.NotifyLevelError, "Error closing Kafka consumer, err: %v", err)
@@ -315,9 +315,7 @@ func (e *Extractor) closeStreamExtract() {
 			e.notifier.Notify(entity.NotifyLevelInfo, "Kafka consumer %+v closed successfully", e.consumer)
 		}
 	}
-	if !isNil(e.dlqProducer) {
-		e.dlqProducer.Close()
-	}
+	e.pf.CloseProducer(e.dlqProducer)
 }
 
 func (e *Extractor) Extract(
@@ -482,7 +480,7 @@ func microBatchTimedOut(start time.Time, mbTimeoutMs int) bool {
 	return time.Since(start) > time.Duration(mbTimeoutMs)*time.Millisecond
 }
 
-func isNil(v any) bool {
+func IsNil(v any) bool {
 	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil())
 }
 

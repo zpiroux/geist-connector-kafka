@@ -335,6 +335,12 @@ func (mpf MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, 
 	return NewMockDlqProducer(conf), nil
 }
 
+func (mpf MockDlqProducerFactory) CloseProducer(p Producer) {
+	if !IsNil(p) {
+		p.Close()
+	}
+}
+
 func (mpf MockDlqProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
 	return &MockAdminClient{}, nil
 }

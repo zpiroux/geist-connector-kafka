@@ -630,6 +630,10 @@ func (mpf *MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (gki.Produ
 	return mpf.Producer, nil
 }
 
+func (mpf *MockDlqProducerFactory) CloseProducer(p gki.Producer) {
+	mpf.Producer.Close()
+}
+
 func (mpf *MockDlqProducerFactory) NewAdminClientFromProducer(p gki.Producer) (gki.AdminClient, error) {
 	return &MockAdminClient{}, nil
 }

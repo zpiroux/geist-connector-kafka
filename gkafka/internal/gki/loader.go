@@ -30,7 +30,7 @@ type Loader struct {
 func NewLoader(ctx context.Context, config *Config, pf ProducerFactory) (*Loader, error) {
 
 	var err error
-	if isNil(pf) {
+	if IsNil(pf) {
 		pf = DefaultProducerFactory{}
 	}
 
