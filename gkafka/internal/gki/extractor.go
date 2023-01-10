@@ -30,15 +30,16 @@ const (
 const DefaultPollTimeoutMs = 3000
 
 type Extractor struct {
-	cf             ConsumerFactory
-	pf             ProducerFactory
-	consumer       Consumer
-	dlqProducer    Producer
-	sourceProducer Producer
-	config         *Config
-	ac             AdminClient
-	notifier       *notify.Notifier
-	eventCount     int64
+	cf              ConsumerFactory
+	pf              ProducerFactory
+	consumer        Consumer
+	dlqProducer     Producer
+	dlqDeliveryChan chan kafka.Event
+	sourceProducer  Producer
+	config          *Config
+	ac              AdminClient
+	notifier        *notify.Notifier
+	eventCount      int64
 }
 
 func NewExtractor(config *Config) (*Extractor, error) {
