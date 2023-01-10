@@ -17,6 +17,7 @@ type Producer interface {
 type ProducerFactory interface {
 	NewProducer(conf *kafka.ConfigMap) (Producer, error)
 	NewAdminClientFromProducer(p Producer) (AdminClient, error)
+	CloseProducer(p Producer)
 }
 
 type DefaultProducerFactory struct{}
@@ -27,6 +28,12 @@ func (d DefaultProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, er
 
 func (d DefaultProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
 	return kafka.NewAdminClientFromProducer(p.(*kafka.Producer))
+}
+
+func (d DefaultProducerFactory) CloseProducer(p Producer) {
+	if !IsNil(p) {
+		p.Close()
+	}
 }
 
 // SharedProducerFactory is a singleton per stream ID and creates and provides a shared
@@ -54,6 +61,18 @@ func (s *SharedProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, er
 		s.producer, err = kafka.NewProducer(conf)
 	}
 	return s.producer, err
+}
+
+// CloseProducer closes the shared producer by means of disregarding the provided one
+// and only once closing the shared one.
+func (s *SharedProducerFactory) CloseProducer(p Producer) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	if s.producer != nil {
+		s.producer.Close()
+		s.producer = nil
+	}
 }
 
 func (s *SharedProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
