@@ -16,6 +16,7 @@ const (
 	dlqMaxPublishBackoffTimeSec = 30
 	dlqTopicNumPartitions       = 6
 	dlqTopicReplicationFactor   = 3
+	dlqDeliveryChanSize         = 32
 )
 
 func NewDLQConfig(pconf map[string]any, enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
@@ -127,11 +128,11 @@ func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
 	}
 
 	e.dlqProducer, err = e.pf.NewProducer(&kconfig)
-
 	if err != nil {
 		return fmt.Errorf(e.lgprfx()+"Failed to create DLQ producer: %s", err.Error())
 	}
 
+	e.dlqDeliveryChan = make(chan kafka.Event, dlqDeliveryChanSize)
 	e.notifier.Notify(entity.NotifyLevelInfo, "DLQ Producer created")
 	return nil
 }
@@ -192,13 +193,13 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 		}
 
 		e.notifier.Notify(entity.NotifyLevelDebug, "sending event to DLQ with producer: %+v", e.dlqProducer)
-		err = e.dlqProducer.Produce(&mCopy, nil)
+		err = e.dlqProducer.Produce(&mCopy, e.dlqDeliveryChan)
 
 		if err != nil {
 			continue
 		}
 
-		event := <-e.dlqProducer.Events()
+		event := <-e.dlqDeliveryChan
 		switch dlqMsg := event.(type) {
 		case *kafka.Message:
 			if dlqMsg.TopicPartition.Error == nil {
