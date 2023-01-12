@@ -178,7 +178,8 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 	for i := 0; ; i++ {
 
 		if err != nil {
-			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds", i, m, dlqTopic, err, backoffDuration)
+			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) (from source event %+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds",
+				i, &mCopy, m, dlqTopic, err, backoffDuration)
 			time.Sleep(time.Duration(backoffDuration) * time.Second)
 			if backoffDuration < dlqMaxPublishBackoffTimeSec {
 				backoffDuration *= 2
@@ -190,6 +191,11 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 			if err != nil {
 				e.notifier.Notify(entity.NotifyLevelError, "failed to enrich event (%+v) on DLQ topic '%s' with err: %v", m, dlqTopic, err)
 			}
+		}
+
+		if ctx.Err() == context.Canceled {
+			e.notifier.Notify(entity.NotifyLevelWarn, "context canceled received in DLQ producer, shutting down")
+			return actionShutdown, err
 		}
 
 		e.notifier.Notify(entity.NotifyLevelDebug, "sending event to DLQ with producer: %+v", e.dlqProducer)
@@ -219,11 +225,6 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 			// Docs don't say if this could happen in single event produce.
 			// Probably not, but if so it might only lead to duplicates, so keep warn log here.
 			e.notifier.Notify(entity.NotifyLevelWarn, "unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
-		}
-
-		if ctx.Err() == context.Canceled {
-			e.notifier.Notify(entity.NotifyLevelWarn, "context canceled received in DLQ producer, shutting down")
-			return actionShutdown, err
 		}
 	}
 }
