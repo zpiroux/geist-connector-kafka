@@ -190,9 +190,8 @@ func TestMoveToDLQ(t *testing.T) {
 		StreamIDEnrichmentPath: "_myenrichment.streamId",
 	})
 	config.SetPollTimout(2000)
-	extractor, err := NewExtractor(config)
+	extractor, err := NewExtractor(config, cf)
 	assert.NoError(t, err)
-	extractor.SetConsumerFactory(cf)
 
 	msg := &kafka.Message{
 		Value: []byte(`{"some":"value"}`),
@@ -278,7 +277,7 @@ func createMockExtractor(createTopics bool, dlqConfig *DLQConfig, spec *entity.S
 		config.SetDLQConfig(*dlqConfig)
 	}
 
-	extractor, err := NewExtractor(config)
+	extractor, err := NewExtractor(config, nil) // TODO: possibly remove Set... and add pf as param in call to New
 	extractor.SetConsumerFactory(MockConsumerFactory{})
 	extractor.SetProducerFactory(MockDlqProducerFactory{})
 	return extractor, err

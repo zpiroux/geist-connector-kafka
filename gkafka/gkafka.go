@@ -46,7 +46,7 @@ const (
 	UniqueGroupIDWithPrefix = "@UniqueWithPrefix"
 )
 
-// Config is the external config provided by the geist client to the factory when
+// Config is the external config provided by the Geist client to the factory when
 // starting up, which is to be used during stream creations.
 type Config struct {
 
@@ -119,12 +119,21 @@ var kafkaTopicCreationMutex sync.Mutex
 // extractorFactory is a singleton enabling extractors/sources to be handled as plug-ins to Geist
 type extractorFactory struct {
 	config *Config
+	cf     gki.ConsumerFactory
+	pf     gki.ProducerFactory
 	pfs    map[string]*gki.SharedProducerFactory
 }
 
-func NewExtractorFactory(config *Config) entity.ExtractorFactory {
+// NewExtractorFactory creates a Geist source connector factory. cf and pf can normally
+// be set to nil to use the default internal ones, unless special setups are needed.
+func NewExtractorFactory(config *Config, cf gki.ConsumerFactory, pf gki.ProducerFactory) entity.ExtractorFactory {
+	if gki.IsNil(pf) {
+		pf = &gki.DefaultProducerFactory{}
+	}
 	return &extractorFactory{
 		config: config,
+		cf:     cf,
+		pf:     pf,
 		pfs:    make(map[string]*gki.SharedProducerFactory),
 	}
 }
@@ -141,14 +150,14 @@ func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (
 		return nil, err
 	}
 
-	e, err := gki.NewExtractor(cfg)
+	e, err := gki.NewExtractor(cfg, ef.cf)
 	if err != nil {
 		return nil, err
 	}
 
 	if useSharedDLQProducer {
 		if _, found := ef.pfs[c.Spec.Id()]; !found {
-			ef.pfs[c.Spec.Id()] = gki.NewSharedProducerFactory()
+			ef.pfs[c.Spec.Id()] = gki.NewSharedProducerFactory(ef.pf)
 		}
 		e.SetProducerFactory(ef.pfs[c.Spec.Id()])
 	}
@@ -175,7 +184,7 @@ func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Co
 		props[k] = v
 	}
 
-	// Add all props from GEIST stream spec (will override previously set ones).
+	// Add all props from Geist stream spec (will override previously set ones).
 	// Apply Geist-specific assignments.
 	for _, prop := range c.Spec.Source.Config.Properties {
 		if prop.Key == PropGroupID && strings.Contains(prop.Value, UniqueGroupIDWithPrefix) {
@@ -314,7 +323,7 @@ func (lf *loaderFactory) createKafkaLoaderConfig(c entity.Config) (*gki.Config, 
 		props[k] = v
 	}
 
-	// Add all props from GEIST spec (will override previously set ones)
+	// Add all props from Geist spec (will override previously set ones)
 	for _, prop := range c.Spec.Sink.Config.Properties {
 		props[prop.Key] = prop.Value
 	}
