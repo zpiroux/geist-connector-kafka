@@ -17,8 +17,10 @@ import (
 type action int
 
 const (
-	actionContinue action = iota
+	actionInvalid action = iota
+	actionContinue
 	actionShutdown
+	actionRetry
 )
 
 // Kafka props which cannot be overridden, required by Extractor
@@ -42,10 +44,14 @@ type Extractor struct {
 	eventCount      int64
 }
 
-func NewExtractor(config *Config) (*Extractor, error) {
+func NewExtractor(config *Config, cf ConsumerFactory) (*Extractor, error) {
+
+	if IsNil(cf) {
+		cf = &DefaultConsumerFactory{}
+	}
 
 	e := &Extractor{
-		cf:     DefaultConsumerFactory{},
+		cf:     cf,
 		pf:     DefaultProducerFactory{},
 		config: config,
 	}

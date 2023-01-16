@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	metadataRequestTimeoutMs    = 5000
-	dlqMaxPublishBackoffTimeSec = 30
-	dlqTopicNumPartitions       = 6
-	dlqTopicReplicationFactor   = 3
-	dlqDeliveryChanSize         = 32
+	metadataRequestTimeoutMs        = 5000
+	dlqMaxPublishBackoffTimeSec     = 30
+	dlqTopicNumPartitions           = 6
+	dlqTopicReplicationFactor       = 3
+	dlqDeliveryChanSize             = 32
+	dlqDeliveryReportTimeoutSeconds = 5
 )
 
 func NewDLQConfig(pconf map[string]any, enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
@@ -178,7 +179,7 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 	for i := 0; ; i++ {
 
 		if err != nil {
-			e.notifier.Notify(entity.NotifyLevelError, "failed (attempt #%d) to publish event (%+v) (from source event %+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds",
+			e.notifier.Notify(entity.NotifyLevelError, "Failed (attempt #%d) to publish event (%+v) (from source event %+v) on DLQ topic '%s' with err: %v - next attempt in %d seconds",
 				i, &mCopy, m, dlqTopic, err, backoffDuration)
 			time.Sleep(time.Duration(backoffDuration) * time.Second)
 			if backoffDuration < dlqMaxPublishBackoffTimeSec {
@@ -189,54 +190,87 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 		if e.config.dlqConfig.StreamIDEnrichmentPath != "" {
 			mCopy.Value, err = e.enrichWithStreamID(mCopy.Value)
 			if err != nil {
-				e.notifier.Notify(entity.NotifyLevelError, "failed to enrich event (%+v) on DLQ topic '%s' with err: %v", m, dlqTopic, err)
+				e.notifier.Notify(entity.NotifyLevelError, "Failed to enrich event (%+v) on DLQ topic '%s' with err: %v", m, dlqTopic, err)
 			}
 		}
 
 		if ctx.Err() == context.Canceled {
-			e.notifier.Notify(entity.NotifyLevelWarn, "context canceled received in DLQ producer, shutting down")
+			e.notifier.Notify(entity.NotifyLevelWarn, "Context canceled received in DLQ producer, shutting down")
 			return actionShutdown, err
 		}
 
-		e.notifier.Notify(entity.NotifyLevelDebug, "sending event to DLQ with producer: %+v", e.dlqProducer)
+		e.notifier.Notify(entity.NotifyLevelDebug, "Sending event to DLQ with producer: %+v", e.dlqProducer)
 		err = e.dlqProducer.Produce(&mCopy, e.dlqDeliveryChan)
 
 		if err != nil {
 			continue
 		}
 
-		event := <-e.dlqDeliveryChan
-		switch dlqMsg := event.(type) {
-		case *kafka.Message:
-			if dlqMsg.TopicPartition.Error == nil {
-				e.handleEventPublishedToDLQ(m, dlqMsg)
-				return actionContinue, err
-			}
+		a, err = e.handleDeliveryReport(ctx, m, &mCopy)
 
-			err = fmt.Errorf("DLQ publish failed with err: %v", dlqMsg.TopicPartition.Error)
+		switch a {
+		case actionContinue, actionShutdown:
+			return a, err
+		case actionRetry:
+			continue
+		default:
+			return actionShutdown, fmt.Errorf("bug, invalid action (%d) returned by handleDeliveryReport, err=%s", a, err)
+		}
+	}
+}
 
-		case kafka.Error:
-			err = fmt.Errorf("kafka error in dlq producer, code: %v, event: %v", dlqMsg.Code(), dlqMsg)
-			// In case of all brokers down, terminate (will be restarted with exponential back-off)
-			if dlqMsg.Code() == kafka.ErrAllBrokersDown {
+func (e *Extractor) handleDeliveryReport(ctx context.Context, m, mCopy *kafka.Message) (a action, err error) {
+	for {
+		select {
+
+		case <-time.After(time.Second * dlqDeliveryReportTimeoutSeconds):
+			// If not getting the report in time, we continue to wait for it until we're
+			// told to shut down. We notify this as an error, even though it might be a
+			// self-healing one, since a delivery report should not take this long to
+			// produce and might need looking into.
+			e.notifier.Notify(entity.NotifyLevelError, "Timeout while waiting for DLQ response for msg: %v", mCopy)
+			if ctx.Err() == context.Canceled {
+				e.notifier.Notify(entity.NotifyLevelWarn, "Context canceled while waiting for DLQ delivery report, shutting down")
 				return actionShutdown, err
 			}
-		default:
-			// Docs don't say if this could happen in single event produce.
-			// Probably not, but if so it might only lead to duplicates, so keep warn log here.
-			e.notifier.Notify(entity.NotifyLevelWarn, "unexpected Kafka info event inside DLQ producer loop, %v", dlqMsg)
+
+		case event := <-e.dlqDeliveryChan:
+
+			switch dlqMsg := event.(type) {
+			case *kafka.Message:
+				if dlqMsg.TopicPartition.Error == nil {
+					e.handleEventPublishedToDLQ(m, dlqMsg)
+					return actionContinue, err
+				}
+
+				err = fmt.Errorf("DLQ publish failed with err: %v", dlqMsg.TopicPartition.Error)
+				return actionRetry, err
+
+			case kafka.Error:
+				err = fmt.Errorf("kafka error in dlq producer, code: %v, event: %v", dlqMsg.Code(), dlqMsg)
+				// In case of all brokers down, terminate (will be restarted with exponential back-off)
+				if dlqMsg.Code() == kafka.ErrAllBrokersDown {
+					return actionShutdown, err
+				}
+				return actionRetry, err
+
+			default:
+				// Docs don't say if this could happen in single event produce.
+				// Probably not, but if so, continue waiting for report.
+				e.notifier.Notify(entity.NotifyLevelWarn, "Unexpected Kafka info event when waiting for DLQ delivery report, %v", dlqMsg)
+			}
 		}
 	}
 }
 
 func (e *Extractor) handleEventPublishedToDLQ(msg, dlqMsg *kafka.Message) {
-	e.notifier.Notify(entity.NotifyLevelInfo, "event published to DLQ %s [%d] at offset %v, value: %s",
+	e.notifier.Notify(entity.NotifyLevelInfo, "Event published to DLQ %s [%d] at offset %v, value: %s",
 		*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition,
 		dlqMsg.TopicPartition.Offset, string(dlqMsg.Value))
 
 	// TODO: When migrated to new common producer, move this out to Extractor
 	if serr := e.storeOffsets([]*kafka.Message{msg}); serr != nil {
 		// No need to handle this error, just log it
-		e.notifier.Notify(entity.NotifyLevelError, "error storing offsets after dlq, event: %+v, err: %v", msg, serr)
+		e.notifier.Notify(entity.NotifyLevelError, "Error storing offsets after DLQ, event: %+v, err: %v", msg, serr)
 	}
 }

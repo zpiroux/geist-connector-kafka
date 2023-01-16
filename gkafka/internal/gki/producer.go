@@ -39,12 +39,14 @@ func (d DefaultProducerFactory) CloseProducer(p Producer) {
 // SharedProducerFactory is a singleton per stream ID and creates and provides a shared
 // Kafka producer for all stream instances of that stream.
 type SharedProducerFactory struct {
-	producer *kafka.Producer
+	pf       ProducerFactory
+	producer Producer
 	mux      *sync.Mutex
 }
 
-func NewSharedProducerFactory() *SharedProducerFactory {
+func NewSharedProducerFactory(pf ProducerFactory) *SharedProducerFactory {
 	return &SharedProducerFactory{
+		pf:  pf,
 		mux: &sync.Mutex{},
 	}
 }
@@ -57,19 +59,31 @@ func (s *SharedProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, er
 	defer s.mux.Unlock()
 
 	var err error
-	if s.producer == nil {
-		s.producer, err = kafka.NewProducer(conf)
+	if IsNil(s.producer) {
+		s.producer, err = s.pf.NewProducer(conf)
 	}
 	return s.producer, err
 }
 
-// CloseProducer closes the shared producer by means of disregarding the provided one
-// and only once closing the shared one.
+// CloseProducer for the non-shared case will close the Kafka producer. For the
+// SharedProducerFactory this cannot be done since it might be used still concurrently
+// by other goroutines. This will therefore not do anything here.
+// For streams being shut down by disabling them, and later re-activated this will not
+// leak any handles since the previous producer will just be re-used again based on
+// the stream ID for that stream.
 func (s *SharedProducerFactory) CloseProducer(p Producer) {
+	// Nothing to do here
+}
+
+// CloseSharedProducer is not part of the standard ProducerFactory interface and must
+// only be used in cases where the caller has full control of the status of all running
+// stream instances (extractors, including producers), which typically is the Geist's
+// Supervisor.
+func (s *SharedProducerFactory) CloseSharedProducer() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	if s.producer != nil {
+	if !IsNil(s.producer) {
 		s.producer.Close()
 		s.producer = nil
 	}
