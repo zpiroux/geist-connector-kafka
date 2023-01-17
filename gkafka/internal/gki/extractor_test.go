@@ -12,6 +12,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -320,27 +321,27 @@ func (m *MockConsumer) Close() error {
 
 type MockConsumerFactory struct{}
 
-func (mcf MockConsumerFactory) NewConsumer(conf *kafka.ConfigMap) (Consumer, error) {
+func (mcf MockConsumerFactory) NewConsumer(conf *kafka.ConfigMap) (ikafka.Consumer, error) {
 	return &MockConsumer{conf: conf}, nil
 }
 
-func (mcf MockConsumerFactory) NewAdminClientFromConsumer(c Consumer) (AdminClient, error) {
+func (mcf MockConsumerFactory) NewAdminClientFromConsumer(c ikafka.Consumer) (ikafka.AdminClient, error) {
 	return &MockAdminClient{}, nil
 }
 
 type MockDlqProducerFactory struct{}
 
-func (mpf MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, error) {
+func (mpf MockDlqProducerFactory) NewProducer(conf *kafka.ConfigMap) (ikafka.Producer, error) {
 	return NewMockDlqProducer(conf), nil
 }
 
-func (mpf MockDlqProducerFactory) CloseProducer(p Producer) {
+func (mpf MockDlqProducerFactory) CloseProducer(p ikafka.Producer) {
 	if !IsNil(p) {
 		p.Close()
 	}
 }
 
-func (mpf MockDlqProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
+func (mpf MockDlqProducerFactory) NewAdminClientFromProducer(p ikafka.Producer) (ikafka.AdminClient, error) {
 	return &MockAdminClient{}, nil
 }
 
@@ -392,7 +393,7 @@ func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.Topic
 	return []kafka.TopicResult{result}, nil
 }
 
-func NewMockDlqProducer(conf *kafka.ConfigMap) Producer {
+func NewMockDlqProducer(conf *kafka.ConfigMap) ikafka.Producer {
 	return &MockDlqProducer{
 		events: make(chan kafka.Event, 10),
 		conf:   conf,

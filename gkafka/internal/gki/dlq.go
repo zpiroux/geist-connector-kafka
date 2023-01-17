@@ -8,6 +8,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/tidwall/sjson"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -108,7 +109,7 @@ func (e *Extractor) createDlqTopic(ctx context.Context) error {
 	return nil
 }
 
-func (e *Extractor) createDlqProducer(pf ProducerFactory) error {
+func (e *Extractor) createDlqProducer(pf ikafka.ProducerFactory) error {
 
 	var err error
 	kconfig := make(kafka.ConfigMap)
@@ -273,4 +274,13 @@ func (e *Extractor) handleEventPublishedToDLQ(msg, dlqMsg *kafka.Message) {
 		// No need to handle this error, just log it
 		e.notifier.Notify(entity.NotifyLevelError, "Error storing offsets after DLQ, event: %+v, err: %v", msg, serr)
 	}
+}
+
+func topicExists(topicToFind string, existingTopics map[string]kafka.TopicMetadata) bool {
+	for _, topic := range existingTopics {
+		if topic.Topic == topicToFind {
+			return true
+		}
+	}
+	return false
 }
