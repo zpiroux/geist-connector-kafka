@@ -8,6 +8,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 	"github.com/zpiroux/geist/entity/transform"
 )
@@ -51,21 +52,21 @@ func createMockLoader(spec *entity.Spec, synchronous bool) (*Loader, error) {
 
 type MockProducerFactory struct{}
 
-func (mpf MockProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, error) {
+func (mpf MockProducerFactory) NewProducer(conf *kafka.ConfigMap) (ikafka.Producer, error) {
 	return NewMockProducer(), nil
 }
 
-func (mpf MockProducerFactory) CloseProducer(p Producer) {
+func (mpf MockProducerFactory) CloseProducer(p ikafka.Producer) {
 	if !IsNil(p) {
 		p.Close()
 	}
 }
 
-func (mpf MockProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
+func (mpf MockProducerFactory) NewAdminClientFromProducer(p ikafka.Producer) (ikafka.AdminClient, error) {
 	return &MockAdminClient{}, nil
 }
 
-func NewMockProducer() Producer {
+func NewMockProducer() ikafka.Producer {
 	p := &MockProducer{}
 	p.events = make(chan kafka.Event, 10)
 	return p

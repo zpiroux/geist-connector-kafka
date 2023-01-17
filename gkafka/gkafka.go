@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -119,14 +120,14 @@ var kafkaTopicCreationMutex sync.Mutex
 // extractorFactory is a singleton enabling extractors/sources to be handled as plug-ins to Geist
 type extractorFactory struct {
 	config *Config
-	cf     gki.ConsumerFactory
-	pf     gki.ProducerFactory
+	cf     ikafka.ConsumerFactory
+	pf     ikafka.ProducerFactory
 	pfs    map[string]*gki.SharedProducerFactory
 }
 
 // NewExtractorFactory creates a Geist source connector factory. cf and pf can normally
 // be set to nil to use the default internal ones, unless special setups are needed.
-func NewExtractorFactory(config *Config, cf gki.ConsumerFactory, pf gki.ProducerFactory) entity.ExtractorFactory {
+func NewExtractorFactory(config *Config, cf ikafka.ConsumerFactory, pf ikafka.ProducerFactory) entity.ExtractorFactory {
 	if gki.IsNil(pf) {
 		pf = &gki.DefaultProducerFactory{}
 	}

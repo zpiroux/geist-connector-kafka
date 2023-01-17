@@ -4,33 +4,20 @@ import (
 	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 )
-
-// Producer interface is used to enable full unit testing
-type Producer interface {
-	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
-	Events() chan kafka.Event
-	Flush(timeoutMs int) int
-	Close()
-}
-
-type ProducerFactory interface {
-	NewProducer(conf *kafka.ConfigMap) (Producer, error)
-	NewAdminClientFromProducer(p Producer) (AdminClient, error)
-	CloseProducer(p Producer)
-}
 
 type DefaultProducerFactory struct{}
 
-func (d DefaultProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, error) {
+func (d DefaultProducerFactory) NewProducer(conf *kafka.ConfigMap) (ikafka.Producer, error) {
 	return kafka.NewProducer(conf)
 }
 
-func (d DefaultProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
+func (d DefaultProducerFactory) NewAdminClientFromProducer(p ikafka.Producer) (ikafka.AdminClient, error) {
 	return kafka.NewAdminClientFromProducer(p.(*kafka.Producer))
 }
 
-func (d DefaultProducerFactory) CloseProducer(p Producer) {
+func (d DefaultProducerFactory) CloseProducer(p ikafka.Producer) {
 	if !IsNil(p) {
 		p.Close()
 	}
@@ -39,12 +26,12 @@ func (d DefaultProducerFactory) CloseProducer(p Producer) {
 // SharedProducerFactory is a singleton per stream ID and creates and provides a shared
 // Kafka producer for all stream instances of that stream.
 type SharedProducerFactory struct {
-	pf       ProducerFactory
-	producer Producer
+	pf       ikafka.ProducerFactory
+	producer ikafka.Producer
 	mux      *sync.Mutex
 }
 
-func NewSharedProducerFactory(pf ProducerFactory) *SharedProducerFactory {
+func NewSharedProducerFactory(pf ikafka.ProducerFactory) *SharedProducerFactory {
 	return &SharedProducerFactory{
 		pf:  pf,
 		mux: &sync.Mutex{},
@@ -54,7 +41,7 @@ func NewSharedProducerFactory(pf ProducerFactory) *SharedProducerFactory {
 // NewProducer provides a shared Kafka producer. Since this method is called concurrently
 // (e.g. from extractors' init section of StreamLoad(), creating the DLQ producer), we need
 // to protect its logic with a mutex.
-func (s *SharedProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, error) {
+func (s *SharedProducerFactory) NewProducer(conf *kafka.ConfigMap) (ikafka.Producer, error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
@@ -71,7 +58,7 @@ func (s *SharedProducerFactory) NewProducer(conf *kafka.ConfigMap) (Producer, er
 // For streams being shut down by disabling them, and later re-activated this will not
 // leak any handles since the previous producer will just be re-used again based on
 // the stream ID for that stream.
-func (s *SharedProducerFactory) CloseProducer(p Producer) {
+func (s *SharedProducerFactory) CloseProducer(p ikafka.Producer) {
 	// Nothing to do here
 }
 
@@ -89,6 +76,6 @@ func (s *SharedProducerFactory) CloseSharedProducer() {
 	}
 }
 
-func (s *SharedProducerFactory) NewAdminClientFromProducer(p Producer) (AdminClient, error) {
+func (s *SharedProducerFactory) NewAdminClientFromProducer(p ikafka.Producer) (ikafka.AdminClient, error) {
 	return kafka.NewAdminClientFromProducer(p.(*kafka.Producer))
 }

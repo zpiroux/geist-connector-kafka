@@ -10,6 +10,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/teltech/logger"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 	"github.com/zpiroux/geist/pkg/notify"
 )
@@ -32,19 +33,19 @@ const (
 const DefaultPollTimeoutMs = 3000
 
 type Extractor struct {
-	cf              ConsumerFactory
-	pf              ProducerFactory
-	consumer        Consumer
-	dlqProducer     Producer
+	cf              ikafka.ConsumerFactory
+	pf              ikafka.ProducerFactory
+	consumer        ikafka.Consumer
+	dlqProducer     ikafka.Producer
 	dlqDeliveryChan chan kafka.Event
-	sourceProducer  Producer
+	sourceProducer  ikafka.Producer
 	config          *Config
-	ac              AdminClient
+	ac              ikafka.AdminClient
 	notifier        *notify.Notifier
 	eventCount      int64
 }
 
-func NewExtractor(config *Config, cf ConsumerFactory) (*Extractor, error) {
+func NewExtractor(config *Config, cf ikafka.ConsumerFactory) (*Extractor, error) {
 
 	if IsNil(cf) {
 		cf = &DefaultConsumerFactory{}
@@ -396,15 +397,15 @@ func (e *Extractor) SendToSource(ctx context.Context, eventData any) (string, er
 	return "", err
 }
 
-func (e *Extractor) SetConsumerFactory(cf ConsumerFactory) {
+func (e *Extractor) SetConsumerFactory(cf ikafka.ConsumerFactory) {
 	e.cf = cf
 }
 
-func (e *Extractor) SetProducerFactory(pf ProducerFactory) {
+func (e *Extractor) SetProducerFactory(pf ikafka.ProducerFactory) {
 	e.pf = pf
 }
 
-func (e *Extractor) createConsumer(cf ConsumerFactory) error {
+func (e *Extractor) createConsumer(cf ikafka.ConsumerFactory) error {
 
 	kconfig := make(kafka.ConfigMap)
 	for k, v := range e.config.configMap {
@@ -453,7 +454,7 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 	return err
 }
 
-func (e *Extractor) createSourceProducer(pf ProducerFactory) error {
+func (e *Extractor) createSourceProducer(pf ikafka.ProducerFactory) error {
 
 	if !e.config.sendToSourceEnabled {
 		return nil

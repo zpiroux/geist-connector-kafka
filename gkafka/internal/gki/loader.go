@@ -9,6 +9,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/teltech/logger"
+	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 	"github.com/zpiroux/geist/pkg/notify"
 )
@@ -16,9 +17,9 @@ import (
 const flushTimeoutSec = 10
 
 type Loader struct {
-	pf                            ProducerFactory
-	producer                      Producer
-	ac                            AdminClient
+	pf                            ikafka.ProducerFactory
+	producer                      ikafka.Producer
+	ac                            ikafka.AdminClient
 	config                        *Config
 	eventCount                    int64
 	requestShutdown               bool
@@ -27,7 +28,7 @@ type Loader struct {
 	notifier                      *notify.Notifier
 }
 
-func NewLoader(ctx context.Context, config *Config, pf ProducerFactory) (*Loader, error) {
+func NewLoader(ctx context.Context, config *Config, pf ikafka.ProducerFactory) (*Loader, error) {
 
 	var err error
 	if IsNil(pf) {
