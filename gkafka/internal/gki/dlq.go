@@ -265,9 +265,8 @@ func (e *Extractor) handleDeliveryReport(ctx context.Context, m, mCopy *kafka.Me
 }
 
 func (e *Extractor) handleEventPublishedToDLQ(msg, dlqMsg *kafka.Message) {
-	e.notifier.Notify(entity.NotifyLevelInfo, "Event published to DLQ %s [%d] at offset %v, value: %s",
-		*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition,
-		dlqMsg.TopicPartition.Offset, string(dlqMsg.Value))
+	e.notifier.Notify(entity.NotifyLevelInfo, "Event published to DLQ %s [%d] at offset %v",
+		*dlqMsg.TopicPartition.Topic, dlqMsg.TopicPartition.Partition, dlqMsg.TopicPartition.Offset)
 
 	// TODO: When migrated to new common producer, move this out to Extractor
 	if serr := e.storeOffsets([]*kafka.Message{msg}); serr != nil {

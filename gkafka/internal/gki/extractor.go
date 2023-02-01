@@ -145,7 +145,7 @@ func (e *Extractor) StreamExtract(
 			if evt.TopicPartition.Error != nil {
 				// This should be a producer-only error. Might have received this here long ago, so keep for logging purposes.
 				*err = evt.TopicPartition.Error
-				e.notifier.Notify(entity.NotifyLevelError, "Topic partition error when consuming message, msg: %+v, msg value: %s, err: %s", evt, string(evt.Value), *err)
+				e.notifier.Notify(entity.NotifyLevelError, "Topic partition error when consuming message, msg: %+v, err: %s", evt, *err)
 
 				// Using normal event processing for this undocumented behaviour
 				// Alternatively, switch to 'continue' here, depending on test results.
@@ -252,12 +252,13 @@ func (e *Extractor) handleEventProcessingResult(
 			*err = fmt.Errorf(e.lgprfx() + "bug, executor should handle all retryable errors, until retries exhausted, shutting down Extractor")
 			return actionShutdown
 		}
-		str := e.lgprfx() + "executor had an unretryable error with this "
+		str := e.lgprfx() + "executor had an unretryable error with this"
 		if len(msgs) == 1 {
-			str = fmt.Sprintf("%s"+"event: '%s', reportEvent result: %+v", str, string(msgs[0].Value), result)
+			str = fmt.Sprintf("%s event", str)
 		} else {
-			str = fmt.Sprintf("%s"+"event batch, reportEvent result: %+v", str, result)
+			str = fmt.Sprintf("%s event batch", str)
 		}
+		str = fmt.Sprintf("%s, reportEvent result: %+v", str, result)
 		e.notifier.Notify(entity.NotifyLevelWarn, "%s", str)
 
 		switch e.config.c.Spec.Ops.HandlingOfUnretryableEvents {
@@ -297,7 +298,7 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 
 	admcli, err := e.cf.NewAdminClientFromConsumer(e.consumer)
 	if err != nil {
-		return fmt.Errorf(e.lgprfx()+"couldn't create admin client, err: %v", err)
+		return fmt.Errorf(e.lgprfx()+"could not create admin client, err: %v", err)
 	}
 	e.ac = admcli
 
@@ -351,7 +352,7 @@ func (e *Extractor) ExtractFromSink(
 func (e *Extractor) SendToSource(ctx context.Context, eventData any) (string, error) {
 
 	if !e.config.sendToSourceEnabled {
-		return "", fmt.Errorf("disabled - set Config.SendToSource to true in extractor factory to enable it")
+		return "", fmt.Errorf("SendToSource disabled - set Config.SendToSource to true in extractor factory to enable it")
 	}
 
 	var err error
