@@ -7,7 +7,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/teltech/logger v1.3.0
 	github.com/tidwall/sjson v1.2.5
-	github.com/zpiroux/geist v0.5.3
+	github.com/zpiroux/geist v0.6.1
 )
 
 require (
