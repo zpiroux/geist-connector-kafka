@@ -1,6 +1,6 @@
 package ikafka
 
-import "github.com/confluentinc/confluent-kafka-go/kafka"
+import "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 
 type Consumer interface {
 	SubscribeTopics(topics []string, rebalanceCb kafka.RebalanceCb) error
