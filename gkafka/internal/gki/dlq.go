@@ -8,6 +8,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/tidwall/sjson"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
@@ -21,7 +22,7 @@ const (
 	dlqDeliveryReportTimeoutSeconds = 5
 )
 
-func NewDLQConfig(pconf map[string]any, enrichPath string, topic *entity.TopicSpecification) (DLQConfig, error) {
+func NewDLQConfig(pconf map[string]any, enrichPath string, topic *spec.TopicSpecification) (DLQConfig, error) {
 	var dlq DLQConfig
 	if topic == nil {
 		return dlq, errors.New("invalid DLQ config provided in stream spec")
@@ -42,7 +43,7 @@ type DLQConfig struct {
 	// setting createTopics is set to false, only Topic.Name is regarded. Otherwise,
 	// NumPartitions and ReplicationFactor will be used as well if the topic is created
 	// (if it doesn't exist already).
-	Topic *entity.TopicSpecification
+	Topic *spec.TopicSpecification
 
 	ProducerConfig map[string]any
 

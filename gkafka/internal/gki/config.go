@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -14,10 +15,11 @@ type ConfigMap map[string]any
 // specific stream
 type Config struct {
 	c                   entity.Config
-	topics              []string                   // list of topics to consume from by Extractor
-	sinkTopic           *entity.TopicSpecification // topic to (create and) publish to by Loader
-	pollTimeoutMs       int                        // timeoutMs in Consumer Poll function
-	configMap           ConfigMap                  // supports all possible Kafka consumer properties
+	topics              []string                 // list of topics to consume from by Extractor
+	sinkTopic           *spec.TopicSpecification // topic to (create and) publish to by Loader
+	message             *spec.Message            // message spec
+	pollTimeoutMs       int                      // timeoutMs in Consumer Poll function
+	configMap           ConfigMap                // supports all possible Kafka consumer properties
 	topicCreationMutex  *sync.Mutex
 	synchronous         bool
 	createTopics        bool
@@ -44,12 +46,14 @@ func NewExtractorConfig(
 
 func NewLoaderConfig(
 	c entity.Config,
-	topic *entity.TopicSpecification,
+	topic *spec.TopicSpecification,
+	message *spec.Message,
 	topicCreationMutex *sync.Mutex,
 	sync bool) *Config {
 	return &Config{
 		c:                  c,
 		sinkTopic:          topic,
+		message:            message,
 		configMap:          make(ConfigMap),
 		topicCreationMutex: topicCreationMutex,
 		synchronous:        sync,

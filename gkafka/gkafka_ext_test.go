@@ -59,9 +59,6 @@ func TestDLQE2E(t *testing.T) {
 		PollTimeoutMs: 250,
 	}
 
-	// Spec creation here is only needed to find out number of streams per pod
-	spec, err := entity.NewSpec(kafkaToVoidStreamDLQE2E)
-	require.NoError(t, err)
 	eventsToSimulate := int64(3)
 
 	consumerFactory := NewMockConsumerFactory(eventsToSimulate)
@@ -69,7 +66,7 @@ func TestDLQE2E(t *testing.T) {
 
 	ef := CreateExtractorFactory(kConfig, consumerFactory, dlqProducerFactory)
 
-	err = geistConfig.RegisterExtractorType(ef)
+	err := geistConfig.RegisterExtractorType(ef)
 	require.NoError(t, err)
 
 	geist, err := geist.New(ctx, geistConfig)
@@ -87,6 +84,9 @@ func TestDLQE2E(t *testing.T) {
 	err = geist.Run(ctx)
 	assert.NoError(t, err)
 
+	// Spec creation here is only needed to find out number of streams per pod
+	spec, err := entity.NewSpec(kafkaToVoidStreamDLQE2E)
+	require.NoError(t, err)
 	assert.Equal(t, int64(spec.Ops.StreamsPerPod)*eventsToSimulate, eventCounter.ProducedDLQEvents.Load())
 }
 
