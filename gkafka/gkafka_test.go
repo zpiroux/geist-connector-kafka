@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
@@ -119,14 +120,14 @@ func TestDLQConfig(t *testing.T) {
 	ctx := context.Background()
 
 	// Validate correct DLQ config created with empty external config
-	spec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
+	streamSpec, err := entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
 	require.NoError(t, err)
 
-	extractor := createExtractor(t, ctx, spec, &Config{}, nil)
+	extractor := createExtractor(t, ctx, streamSpec, &Config{}, nil)
 	dlqConfig := extractor.(*gki.Extractor).DLQConfig()
 	require.NotNil(t, dlqConfig.Topic)
 	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
-	expectedDLQTopic := entity.TopicSpecification{
+	expectedDLQTopic := spec.TopicSpecification{
 		Name:              "my.dlq.topic",
 		NumPartitions:     1,
 		ReplicationFactor: 1,
@@ -134,13 +135,13 @@ func TestDLQConfig(t *testing.T) {
 	assert.Equal(t, &expectedDLQTopic, dlqConfig.Topic)
 
 	// Validate creating DLQ topic in custom region
-	spec, err = entity.NewSpec(kafkaToVoidStreamCustomEnvWithDLQ)
+	streamSpec, err = entity.NewSpec(kafkaToVoidStreamCustomEnvWithDLQ)
 	require.NoError(t, err)
-	extractor = createExtractor(t, ctx, spec, &Config{Env: "my-custom-env", CreateTopics: true}, nil)
+	extractor = createExtractor(t, ctx, streamSpec, &Config{Env: "my-custom-env", CreateTopics: true}, nil)
 	dlqConfig = extractor.(*gki.Extractor).DLQConfig()
 	require.NotNil(t, dlqConfig.Topic)
 	assert.Equal(t, "_myservice.metadata.streamId", dlqConfig.StreamIDEnrichmentPath)
-	expectedDLQTopic = entity.TopicSpecification{
+	expectedDLQTopic = spec.TopicSpecification{
 		Name:              "my.dlq.topic",
 		NumPartitions:     24,
 		ReplicationFactor: 6,
@@ -149,7 +150,7 @@ func TestDLQConfig(t *testing.T) {
 
 	// Validate config of fully created DLQ producer
 	pf := &MockDlqProducerFactory{}
-	extractor = createExtractor(t, ctx, spec, &Config{Env: "my-custom-env", CreateTopics: false}, pf)
+	extractor = createExtractor(t, ctx, streamSpec, &Config{Env: "my-custom-env", CreateTopics: false}, pf)
 	var retryable bool
 	ctx, cancel := context.WithCancel(ctx)
 	cancel() // We use a closed ctx to return early from StreamExtract
@@ -235,37 +236,45 @@ func TestTopicNamesFromSpec(t *testing.T) {
 	ef := NewExtractorFactory(&Config{Env: envs[envDev]}, nil, nil)
 	kef := ef.(*extractorFactory)
 
-	spec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
+	streamSpec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
 	assert.NoError(t, err)
-	topics := kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	sourceConfig, err := spec.NewSourceConfigFromLegacySpec(streamSpec)
+	assert.NoError(t, err)
+	topics := kef.topicNamesFromSpec(sourceConfig.Topics)
 	assert.Equal(t, topics, []string{"foo.events.dev"})
 
 	kef.config.Env = envs[envStage]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	topics = kef.topicNamesFromSpec(sourceConfig.Topics)
 	assert.Equal(t, topics, []string{"foo.events.stage"})
 
 	kef.config.Env = envs[envProd]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	topics = kef.topicNamesFromSpec(sourceConfig.Topics)
 	assert.Equal(t, topics, []string{"foo.events"})
 
-	spec, err = entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
+	streamSpec, err = entity.NewSpec(kafkaToVoidStreamCommonEnvWithDLQ)
+	assert.NoError(t, err)
+	sourceConfig, err = spec.NewSourceConfigFromLegacySpec(streamSpec)
 	assert.NoError(t, err)
 	for _, env := range envs {
 		kef.config.Env = env
-		topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+		topics = kef.topicNamesFromSpec(sourceConfig.Topics)
 		assert.Equal(t, topics, []string{"foo.events", "bar.events"})
 	}
 
 	// Test handling of missing envs
-	spec, err = entity.NewSpec(kafkaToKafkaDevOnly)
+	streamSpec, err = entity.NewSpec(kafkaToKafkaDevOnly)
+	assert.NoError(t, err)
+	sourceConfig, err = spec.NewSourceConfigFromLegacySpec(streamSpec)
 	assert.NoError(t, err)
 	kef.config.Env = envs[envProd]
-	topics = kef.topicNamesFromSpec(spec.Source.Config.Topics)
+	topics = kef.topicNamesFromSpec(sourceConfig.Topics)
 	assert.Empty(t, topics)
 
 	lf := NewLoaderFactory(&Config{Env: envs[envProd]})
 	klf := lf.(*loaderFactory)
-	topicSpec := topicSpecFromSpec(klf.config.Env, spec.Sink.Config.Topic)
+	sinkConfig, err := spec.NewSinkConfigFromLegacySpec(streamSpec)
+	assert.NoError(t, err)
+	topicSpec := topicSpecFromSpec(klf.config.Env, sinkConfig.Topic)
 	assert.Nil(t, topicSpec)
 }
 
@@ -594,36 +603,38 @@ var kafkaToVoidStreamDLQE2E = []byte(`
     "version": 1,
     "description": "...",
     "ops": {
-		"streamsPerPod": 3,
+        "streamsPerPod": 3,
         "handlingOfUnretryableEvents": "dlq"
     },
     "source": {
         "type": "kafka",
         "config": {
-            "topics": [
-                {
-                    "env": "all",
-                    "names": [
-                        "foo.events"
-                    ]
-                }
-            ],
-            "dlq": {
-                "topic": [
+            "customConfig": {
+                "topics": [
                     {
                         "env": "all",
-                        "topicSpec": {
-                            "name": "my.dlq.topic"
+                        "names": [
+                            "foo.events"
+                        ]
+                    }
+                ],
+                "dlq": {
+                    "topic": [
+                        {
+                            "env": "all",
+                            "topicSpec": {
+                                "name": "my.dlq.topic"
+                            }
                         }
+                    ]
+                },
+                "properties": [
+                    {
+                        "key": "group.id",
+                        "value": "geisttest-dlq-e2e"
                     }
                 ]
-            },
-            "properties": [
-                {
-                    "key": "group.id",
-                    "value": "geisttest-dlq-e2e"
-                }
-            ]
+            }
         }
     },
     "transform": {

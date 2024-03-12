@@ -9,6 +9,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/teltech/logger"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 	"github.com/zpiroux/geist/pkg/notify"
@@ -89,7 +90,7 @@ func (l *Loader) StreamLoad(ctx context.Context, data []*entity.Transformed) (st
 		return "", errors.New("streamLoad called without data to load (data[0] == nil)"), false
 	}
 
-	payloadKey := l.config.c.Spec.Sink.Config.Message.PayloadFromId
+	payloadKey := l.config.message.PayloadFromId
 
 	msg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &l.config.sinkTopic.Name, Partition: kafka.PartitionAny},
@@ -246,7 +247,7 @@ func (l *Loader) deliveryReportHandler(ctxParent context.Context, ctxThis contex
 	}
 }
 
-func (l *Loader) createTopic(ctx context.Context, topicSpec *entity.TopicSpecification) error {
+func (l *Loader) createTopic(ctx context.Context, topicSpec *spec.TopicSpecification) error {
 
 	if !l.config.createTopics {
 		return nil

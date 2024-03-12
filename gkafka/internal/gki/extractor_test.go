@@ -12,6 +12,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
@@ -80,7 +81,7 @@ func TestExtractor(t *testing.T) {
 func TestRetryableFailure(t *testing.T) {
 
 	var retryable bool
-	dlqConfig := DLQConfig{Topic: &entity.TopicSpecification{
+	dlqConfig := DLQConfig{Topic: &spec.TopicSpecification{
 		Name:              DLQTopicName,
 		NumPartitions:     1,
 		ReplicationFactor: 3}}
@@ -120,7 +121,7 @@ func TestRetryableFailure(t *testing.T) {
 func TestUnretryableFailure(t *testing.T) {
 
 	var retryable bool
-	dlqConfig := DLQConfig{Topic: &entity.TopicSpecification{Name: DLQTopicName}}
+	dlqConfig := DLQConfig{Topic: &spec.TopicSpecification{Name: DLQTopicName}}
 
 	for _, houeMode := range allHoueModes {
 		eventCount = 0
@@ -181,13 +182,13 @@ func TestMoveToDLQ(t *testing.T) {
 	notifyChan := make(entity.NotifyChan, 128)
 	go handleNotificationEvents(notifyChan)
 
-	spec := GetMockSpec()
-	spec.Ops.HandlingOfUnretryableEvents = entity.HoueDlq
-	config := NewExtractorConfig(entity.Config{Spec: spec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
+	mspec := GetMockSpec()
+	mspec.Ops.HandlingOfUnretryableEvents = entity.HoueDlq
+	config := NewExtractorConfig(entity.Config{Spec: mspec, ID: "mockInstanceId", NotifyChan: notifyChan}, []string{"coolTopic"}, &sync.Mutex{})
 
 	// Also including validation of stream ID enrichment
 	config.SetDLQConfig(DLQConfig{
-		Topic:                  &entity.TopicSpecification{Name: dlqTopicName},
+		Topic:                  &spec.TopicSpecification{Name: dlqTopicName},
 		StreamIDEnrichmentPath: "_myenrichment.streamId",
 	})
 	config.SetPollTimout(2000)
