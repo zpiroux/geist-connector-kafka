@@ -167,21 +167,9 @@ func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (
 }
 
 func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Config, error) {
-	var (
-		sourceConfig spec.SourceConfig
-		err          error
-	)
-
-	if c.Spec.Source.Config.CustomConfig == nil {
-		sourceConfig, err = spec.NewSourceConfigFromLegacySpec(c.Spec)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		sourceConfig, err = spec.NewSourceConfig(c.Spec)
-		if err != nil {
-			return nil, err
-		}
+	sourceConfig, err := spec.NewSourceConfig(c.Spec)
+	if err != nil {
+		return nil, err
 	}
 	return ef.createExtractorConfig(c, sourceConfig)
 }
@@ -317,21 +305,9 @@ func (lf *loaderFactory) NewSinkExtractor(ctx context.Context, c entity.Config) 
 }
 
 func (lf *loaderFactory) createKafkaLoaderConfig(c entity.Config) (*gki.Config, error) {
-	var (
-		sinkConfig spec.SinkConfig
-		err        error
-	)
-
-	if c.Spec.Sink.Config.CustomConfig == nil {
-		sinkConfig, err = spec.NewSinkConfigFromLegacySpec(c.Spec)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		sinkConfig, err = spec.NewSinkConfig(c.Spec)
-		if err != nil {
-			return nil, err
-		}
+	sinkConfig, err := spec.NewSinkConfig(c.Spec)
+	if err != nil {
+		return nil, err
 	}
 	return lf.createLoaderConfig(c, sinkConfig)
 }
