@@ -161,28 +161,31 @@ var genericSourceToKafkaSinkSpecOld = []byte(`
    "sink": {
       "type": "kafka",
       "config": {
-         "topic": [
-            {
-               "env": "all",
-               "topicSpec": {
-                  "name": "events_from_source_x",
-                  "numPartitions": 6,
-                  "replicationFactor": 3
+         "customConfig": {
+            "topic": [
+               {
+                  "env": "all",
+                  "topicSpec": {
+                     "name": "events_from_source_x",
+                     "numPartitions": 6,
+                     "replicationFactor": 3
+                  }
                }
+            ],
+            "properties": [
+               {
+                  "key": "client.id",
+                  "value": "geist_xtokafkaproxy"
+               }
+            ],
+            "message": {
+               "payloadFromId": "payload"
             }
-         ],
-         "properties": [
-            {
-               "key": "client.id",
-               "value": "geist_xtokafkaproxy"
-            }
-         ],
-         "message": {
-            "payloadFromId": "payload"
          }
       }
    }
-}`)
+}
+`)
 
 var genericSourceToKafkaSinkSpecNew = []byte(`
 {

@@ -40,9 +40,11 @@ g, err := geist.New(ctx, geistConfig)
 ...
 ```
 
+For details on available config options in `gkafka.Config`, see [gkafka.go](gkafka/gkafka.go#L52).
+
 ### Stream Spec Configuration
 
-Common default Kafka properties for the streams can be provided when creating the factory using its `Config` fields.
+Common default Kafka properties for the streams can be provided when creating the factory using fields in `gkafka.Config`.
 
 Any Kafka property can also be provided in the Stream Spec itself, which then overrides the factory provided ones.
 
@@ -50,11 +52,9 @@ The only special config option provided in addition to the Kafka-native ones is 
 
 If the `group.id` property is assigned with a value on the format `"@UniqueWithPrefix.my-groupid-prefix"` a unique `group.id` value will be generated on the format `"my-groupid-prefix.<unique extractor id>.<ISO UTC timestamp micros>"`.
 
-In addition to config as part of Kafka config properties, the following are available for a Kafka source in the stream spec:
+In addition to config as part of Kafka config properties, other fields for topic spec, poll timeout and DLQ config, etc, are available. See [spec.go](gkafka/spec/spec.go#L19) for details.
 
-* Poll timeout: standard Kafka consumer config.
-* DLQ config:  If the stream is configured to use DLQ for unprocessable events (causing unretryable errors), the name of the DLQ topic needs to be provided here. If the extractor connector's `createTopics` config is set to true, the DLQ topic will be created automatically. See the DLQ struct in Geist Spec definition for more info.
-
+Example specs (as used in unit tests) can be found in [gkafka_test.go](gkafka/gkafka_test.go#L366).
 
 ## Limitations and improvement areas
 

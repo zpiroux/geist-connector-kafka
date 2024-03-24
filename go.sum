@@ -1554,8 +1554,8 @@ github.com/yvasiyarov/gorelic v0.0.0-20141212073537-a9bba5b9ab50/go.mod h1:NUSPS
 github.com/yvasiyarov/newrelic_platform_go v0.0.0-20140908184405-b21fdbd4370f/go.mod h1:GlGEuHIJweS1mbCqG+7vt2nvWLzLLnRHbXz5JKd/Qbg=
 github.com/zeebo/assert v1.3.0/go.mod h1:Pq9JiuJQpG8JLJdtkwrJESF0Foym2/D9XMU5ciN/wJ0=
 github.com/zeebo/xxh3 v1.0.2/go.mod h1:5NWz9Sef7zIDm2JHfFlcQvNekmcEl9ekUZQQKCYaDcA=
-github.com/zpiroux/geist v0.9.0 h1:+jkSC6jVXpv1E4nzw9UQHogul5taBbDXMDn388IeUD4=
-github.com/zpiroux/geist v0.9.0/go.mod h1:W9ZJQYcJphXNsBCR5KjkfycN43wsRXcw4RRMvlcfxPs=
+github.com/zpiroux/geist v0.11.0 h1:fhUzJVOK6qaSXaA+LYdxLubwKY0BvTVg4SUSiXqqhSg=
+github.com/zpiroux/geist v0.11.0/go.mod h1:W9ZJQYcJphXNsBCR5KjkfycN43wsRXcw4RRMvlcfxPs=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.3/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=
 go.etcd.io/bbolt v1.3.5/go.mod h1:G5EMThwa9y8QZGBClrRx5EY+Yw9kAhnjy3bSjsnlVTQ=

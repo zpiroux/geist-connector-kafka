@@ -2,8 +2,14 @@ package spec
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/zpiroux/geist/entity"
+)
+
+// Errors
+var (
+	ErrMissingConfig = errors.New("required config is missing in stream spec")
 )
 
 // SourceConfig specifies the schema for the "customConfig" field in the "source" section
@@ -11,44 +17,38 @@ import (
 // the stream spec. Any config provided in the stream spec will override the config provided
 // in the factory creation.
 type SourceConfig struct {
+	// Topics (required) specifies which topics to use.
 	Topics []Topics `json:"topics,omitempty"`
 
-	// PollTimeoutMs specifies after how long time to return from the Poll() call if no messages
-	// are available for consumption. Normally this is not needed to be provided in the stream spec.
-	// It has no impact on throughput. A higher value will lower the cpu load on idle streams.
-	// If omitted in the spec and in the factory config, the value gki.DefaultPollTimeoutMs will be used.
+	// PollTimeoutMs (optional) specifies after how long time to return from the Poll() call if no
+	// messages are available for consumption. Normally this is not needed to be provided in the
+	// stream spec. It has no impact on throughput. A higher value will lower the cpu load on idle
+	// streams. If omitted in the spec and in the factory config, the value gki.DefaultPollTimeoutMs
+	// will be used.
 	PollTimeoutMs *int `json:"pollTimeoutMs,omitempty"`
 
-	// Properties can be used to provide standard Kafka properties.
+	// Properties (optional) can be used to provide standard Kafka properties.
 	Properties []Property `json:"properties,omitempty"`
 
-	// SendToSource is an optional field for an extractor/source connector to support. If it does, it has the
-	// following meaning:
+	// SendToSource (optional) specifies how extractors should handle send-to-source logic. See
+	// gkafka.Config.SendToSource for more information on this feature.
+	// Available options in the stream spec are:
 	// 		* If set to true: The extractors SendToSource() interface method is enabled for this particualar stream.
 	//		* If set to false: The extractors SendToSource() interface method is disabled for this particualar stream
 	// 		* If omitted: The value to use will be the default value as set when constructing the connector.
 	// One reason to have this config availble per stream is to reduce memory allocation when it's not needed.
 	SendToSource *bool
 
-	// DLQ details the options for DLQ handling and is often required if Ops.HandlingOfUnretryableEvents
-	// is set to "dlq". This is dependent on the specification options for each source connector type.
+	// DLQ (optional) details the options for DLQ handling and is required if Ops.HandlingOfUnretryableEvents
+	// is set to "dlq".
 	DLQ *DLQ `json:"dlq,omitempty"`
 }
 
 func NewSourceConfig(spec *entity.Spec) (sc SourceConfig, err error) {
+	if spec.Source.Config.CustomConfig == nil {
+		return sc, ErrMissingConfig
+	}
 	sinkConfigIn, err := json.Marshal(spec.Source.Config.CustomConfig)
-	if err != nil {
-		return sc, err
-	}
-	err = json.Unmarshal(sinkConfigIn, &sc)
-	if err == nil {
-		err = sc.Validate()
-	}
-	return sc, err
-}
-
-func NewSourceConfigFromLegacySpec(spec *entity.Spec) (sc SourceConfig, err error) {
-	sinkConfigIn, err := json.Marshal(spec.Source.Config)
 	if err != nil {
 		return sc, err
 	}
@@ -70,10 +70,10 @@ type SinkConfig struct {
 	Topic   []SinkTopic `json:"topic,omitempty"`
 	Message *Message    `json:"message,omitempty"`
 
-	// Synchronous is used by Kafka sink/loader to specify if ensuring each event is guaranteed to be persisted to
-	// broker (Synchronous: true), giving lower throughput (without not yet provided batch option), or if verifying
-	// delivery report asynchronously (Synchronous: false), giving much higher throughput, but could lead to
-	// message loss if GEIST host crashes.
+	// Synchronous is used to specify if each event should be guaranteed to be persisted to the
+	// broker (Synchronous: true), giving lower throughput (without not yet provided batch option),
+	// or if verifying delivery report asynchronously (Synchronous: false), giving much higher
+	// throughput, but could lead to message loss if GEIST host crashes.
 	Synchronous *bool `json:"synchronous,omitempty"`
 
 	// Direct low-level entity properties like Kafka producer props
@@ -81,6 +81,9 @@ type SinkConfig struct {
 }
 
 func NewSinkConfig(spec *entity.Spec) (sc SinkConfig, err error) {
+	if spec.Sink.Config.CustomConfig == nil {
+		return sc, ErrMissingConfig
+	}
 	sinkConfigIn, err := json.Marshal(spec.Sink.Config.CustomConfig)
 	if err != nil {
 		return sc, err
@@ -121,12 +124,15 @@ type Property struct {
 	Value string `json:"value"`
 }
 
+// DLQ specifies how the extractor should handle DLQ logic. This config is required if
+// "ops.handlingOfUnretryableEvents" field in the spec should support the "dlq" option,
+// which activates when the downstream processing returns unretryable errors.
 type DLQ struct {
 	// Topic specifies which topic to use for DLQ events. If the extractor config does not
-	// allow topic creation, only Topic[].Name is regarded. Otherwise, additional properties
-	// such as NumPartitions and ReplicationFactor will be used as well if the topic is created
-	// (if it doesn't exist already). Since this is regarded as a sink mechanism the same type
-	// is used here as for a standard sink.
+	// allow topic creation (gkafka.Config.CreateTopics is set to false), only Topic[].Name
+	// is regarded. Otherwise, additional properties such as NumPartitions and ReplicationFactor
+	// will be used as well if the topic is created (if it doesn't exist already). Since this
+	// is regarded as a sink mechanism the same type is used here as for a standard sink.
 	Topic []SinkTopic `json:"topic,omitempty"`
 
 	// Generic config map for DLQ producers
