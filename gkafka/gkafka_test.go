@@ -747,6 +747,8 @@ func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.Topic
 	return []kafka.TopicResult{result}, nil
 }
 
+func (m *MockAdminClient) Close() {}
+
 type MockConsumer struct {
 	conf             *kafka.ConfigMap
 	eventsToSimulate int64

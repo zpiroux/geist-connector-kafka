@@ -9,7 +9,6 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/tidwall/sjson"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
-	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 )
 
@@ -65,7 +64,7 @@ func (e *Extractor) initDLQ(ctx context.Context) (err error) {
 		return err
 	}
 
-	if err = e.createDlqProducer(e.pf); err != nil {
+	if err = e.createDlqProducer(); err != nil {
 		return err
 	}
 
@@ -110,7 +109,7 @@ func (e *Extractor) createDlqTopic(ctx context.Context) error {
 	return nil
 }
 
-func (e *Extractor) createDlqProducer(pf ikafka.ProducerFactory) error {
+func (e *Extractor) createDlqProducer() error {
 
 	var err error
 	kconfig := make(kafka.ConfigMap)
