@@ -119,6 +119,9 @@ func (l *Loader) Shutdown(ctx context.Context) {
 		if l.shutdownDeliveryReportHandler != nil {
 			l.shutdownDeliveryReportHandler()
 		}
+		if !IsNil(l.ac) {
+			l.ac.Close()
+		}
 		l.producer.Close()
 		l.producer = nil
 		l.notifier.Notify(entity.NotifyLevelInfo, "Shutdown completed, number of published events: %d", l.eventCount)

@@ -306,7 +306,7 @@ func (e *Extractor) initStreamExtract(ctx context.Context) error {
 		return err
 	}
 
-	if err = e.createSourceProducer(e.pf); err != nil {
+	if err = e.createSourceProducer(); err != nil {
 		return err
 	}
 	if err = e.consumer.SubscribeTopics(e.config.topics, nil); err != nil {
@@ -323,6 +323,9 @@ func (e *Extractor) closeStreamExtract() {
 		} else {
 			e.notifier.Notify(entity.NotifyLevelInfo, "Kafka consumer %+v closed successfully", e.consumer)
 		}
+	}
+	if !IsNil(e.ac) {
+		e.ac.Close()
 	}
 	e.pf.CloseProducer(e.dlqProducer)
 }
@@ -455,7 +458,7 @@ func (e *Extractor) storeOffsets(msgs []*kafka.Message) error {
 	return err
 }
 
-func (e *Extractor) createSourceProducer(pf ikafka.ProducerFactory) error {
+func (e *Extractor) createSourceProducer() error {
 
 	if !e.config.sendToSourceEnabled {
 		return nil
