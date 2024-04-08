@@ -394,7 +394,9 @@ func (m *MockAdminClient) CreateTopics(ctx context.Context, topics []kafka.Topic
 	return []kafka.TopicResult{result}, nil
 }
 
-func (m *MockAdminClient) Close() {}
+func (m *MockAdminClient) Close() {
+	// Nothing to close
+}
 
 func NewMockDlqProducer(conf *kafka.ConfigMap) ikafka.Producer {
 	return &MockDlqProducer{
