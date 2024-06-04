@@ -1,13 +1,15 @@
 module github.com/zpiroux/geist-connector-kafka
 
-go 1.19
+go 1.21
+
+toolchain go1.21.6
 
 require (
-	github.com/confluentinc/confluent-kafka-go/v2 v2.3.0
+	github.com/confluentinc/confluent-kafka-go/v2 v2.4.0
 	github.com/stretchr/testify v1.9.0
 	github.com/teltech/logger v1.3.0
 	github.com/tidwall/sjson v1.2.5
-	github.com/zpiroux/geist v0.11.0
+	github.com/zpiroux/geist v0.13.0
 )
 
 require (
