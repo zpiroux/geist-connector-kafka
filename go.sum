@@ -315,8 +315,8 @@ github.com/xeipuuv/gojsonschema v1.2.0 h1:LhYJRs+L4fBtjZUfuSZIKGeVu0QRy8e5Xi7D17
 github.com/xeipuuv/gojsonschema v1.2.0/go.mod h1:anYRn/JVcOK2ZgGU+IjEV4nwlhoK5sQluxsYJ78Id3Y=
 github.com/yusufpapurcu/wmi v1.2.3 h1:E1ctvB7uKFMOJw3fdOW32DwGE9I7t++CRUEMKvFoFiw=
 github.com/yusufpapurcu/wmi v1.2.3/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zpiroux/geist v0.14.0 h1:q1Pg11rqCawKJBARlGHyqnFlwTMSNL0E7hBaF+BFlJk=
-github.com/zpiroux/geist v0.14.0/go.mod h1:wxJoFP0XtOKlgfQtzIEkmyMWl77ue9FMuE5hR7Yxrfo=
+github.com/zpiroux/geist v0.14.1 h1:q/EmG0qpohn1L/Z/UGGDWTvVycbBJSKHd1fhCQ3JDUM=
+github.com/zpiroux/geist v0.14.1/go.mod h1:wxJoFP0XtOKlgfQtzIEkmyMWl77ue9FMuE5hR7Yxrfo=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 h1:4Pp6oUg3+e/6M4C0A/3kJ2VYa++dsWVTtGgLVj5xtHg=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0/go.mod h1:Mjt1i1INqiaoZOMGR1RIUJN+i3ChKoFRqzrRQhlkbs0=
 go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.46.1 h1:gbhw/u49SS3gkPWiYweQNJGm/uJN5GkI/FrosxSHT7A=
