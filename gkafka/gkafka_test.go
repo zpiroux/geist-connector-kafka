@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -171,7 +172,7 @@ func TestDLQConfig(t *testing.T) {
 }
 
 func createExtractor(t *testing.T, ctx context.Context, spec *entity.Spec, config *Config, pf ikafka.ProducerFactory) entity.Extractor {
-	ef := NewExtractorFactory(config, nil, pf)
+	ef := NewExtractorFactory(config, nil, pf, nil)
 	extractor, err := ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.NoError(t, err)
 	return extractor
@@ -187,7 +188,7 @@ func TestMissingGroupID(t *testing.T) {
 	ctx := context.Background()
 	spec, err := entity.NewSpec(kafkaToVoidMissingGroupID)
 	assert.NoError(t, err)
-	ef := NewExtractorFactory(&Config{}, nil, nil)
+	ef := NewExtractorFactory(&Config{}, nil, nil, nil)
 	_, err = ef.NewExtractor(ctx, NewEntityConfig(spec))
 	assert.True(t, errors.Is(err, ErrMissingGroupID))
 }
@@ -233,7 +234,7 @@ var envs = map[envType]string{
 
 func TestTopicNamesFromSpec(t *testing.T) {
 
-	ef := NewExtractorFactory(&Config{Env: envs[envDev]}, nil, nil)
+	ef := NewExtractorFactory(&Config{Env: envs[envDev]}, nil, nil, nil)
 	kef := ef.(*extractorFactory)
 
 	streamSpec, err := entity.NewSpec(kafkaToVoidStreamSplitEnv)
@@ -752,9 +753,11 @@ func (m *MockAdminClient) Close() {
 }
 
 type MockConsumer struct {
-	conf             *kafka.ConfigMap
-	eventsToSimulate int64
-	eventsConsumed   int64
+	conf              *kafka.ConfigMap
+	eventsToSimulate  int64
+	eventsConsumed    int64
+	eventDataToSend   []byte
+	lastEventConsumed *kafka.Message
 }
 
 func (m *MockConsumer) SubscribeTopics(topics []string, rebalanceCb kafka.RebalanceCb) error {
@@ -767,11 +770,20 @@ func (m *MockConsumer) Poll(timeoutMs int) kafka.Event {
 	}
 	time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
 	m.eventsConsumed++
-	return &kafka.Message{
-		Value:     []byte(`{"someField": "someData"}`),
+	m.lastEventConsumed = &kafka.Message{
+		Value:     m.eventDataToSend,
 		Timestamp: time.Now().UTC(),
+		TopicPartition: kafka.TopicPartition{
+			Topic: ptrStr("some-topic"),
+		},
 	}
+	return m.lastEventConsumed
 }
+
+func ptrStr(s string) *string {
+	return &s
+}
+
 func (m *MockConsumer) StoreOffsets(offsets []kafka.TopicPartition) ([]kafka.TopicPartition, error) {
 	var tp []kafka.TopicPartition
 	return tp, nil
@@ -792,15 +804,28 @@ func (m *MockConsumer) Close() error {
 }
 
 type MockConsumerFactory struct {
+	consumer         *MockConsumer
 	eventsToSimulate int64
+	eventDataToSend  []byte
+	mu               sync.Mutex
 }
 
-func NewMockConsumerFactory(eventsToSimulate int64) *MockConsumerFactory {
-	return &MockConsumerFactory{eventsToSimulate: eventsToSimulate}
+func NewMockConsumerFactory(eventsToSimulate int64, eventDataToSend []byte) *MockConsumerFactory {
+	if eventDataToSend == nil {
+		eventDataToSend = []byte(`{"someField": "someData"}`)
+	}
+	return &MockConsumerFactory{eventsToSimulate: eventsToSimulate, eventDataToSend: eventDataToSend}
 }
 
 func (mcf *MockConsumerFactory) NewConsumer(conf *kafka.ConfigMap) (ikafka.Consumer, error) {
-	return &MockConsumer{conf: conf, eventsToSimulate: mcf.eventsToSimulate}, nil
+	mcf.mu.Lock()
+	defer mcf.mu.Unlock()
+	mcf.consumer = &MockConsumer{
+		conf:             conf,
+		eventsToSimulate: mcf.eventsToSimulate,
+		eventDataToSend:  mcf.eventDataToSend,
+	}
+	return mcf.consumer, nil
 }
 
 func (mcf *MockConsumerFactory) NewAdminClientFromConsumer(c ikafka.Consumer) (ikafka.AdminClient, error) {

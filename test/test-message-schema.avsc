@@ -1,0 +1,74 @@
+{
+    "type": "record",
+    "name": "BerryPurchaseEvent",
+    "namespace": "geist.connector.kafka.test",
+    "fields": [
+        {
+            "name": "machine_info",
+            "type": {
+                "type": "record",
+                "name": "MachineInfo",
+                "fields": [
+                    {
+                        "name": "machine_id",
+                        "type": "string"
+                    },
+                    {
+                        "name": "location",
+                        "type": "string"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "user_info",
+            "type": {
+                "type": "record",
+                "name": "UserInfo",
+                "fields": [
+                    {
+                        "name": "user_id",
+                        "type": "string"
+                    },
+                    {
+                        "name": "membership_level",
+                        "type": "string"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "purchase_details",
+            "type": {
+                "type": "record",
+                "name": "PurchaseDetails",
+                "fields": [
+                    {
+                        "name": "berry_id",
+                        "type": "string"
+                    },
+                    {
+                        "name": "display_name",
+                        "type": "string"
+                    },
+                    {
+                        "name": "quantity",
+                        "type": "int"
+                    },
+                    {
+                        "name": "price_per_item",
+                        "type": "float"
+                    },
+                    {
+                        "name": "total_price",
+                        "type": "float"
+                    },
+                    {
+                        "name": "timestamp",
+                        "type": "string"
+                    }
+                ]
+            }
+        }
+    ]
+}

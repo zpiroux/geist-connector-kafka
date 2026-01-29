@@ -1,3 +1,4 @@
+// Package spec defines the schema for the connector's stream spec configuration.
 package spec
 
 import (
@@ -12,11 +13,60 @@ var (
 	ErrMissingConfig = errors.New("required config is missing in stream spec")
 )
 
+const (
+	OnDeserErrorRestartStream  = "restartStream"
+	OnDeserErrorShutdownStream = "shutdownStream"
+	OnDeserErrorDiscardMessage = "discardMessage"
+)
+
+// SchemaRegistryConfig specifies the schema for the "schemaRegistry" field in the "source.customConfig"
+// section of the stream spec. It enables configuring schema registry usage for the extractor.
+type SchemaRegistryConfig struct {
+
+	// DataFormat specifies how the Kafka message value is encoded for this stream.
+	// Currently only "avro" is supported.
+	DataFormat string `json:"dataFormat"`
+
+	// OnDeserializationError specifies how deserialization errors should be handled.
+	// Possible values are:
+	//
+	//   "restartStream":
+	//      The extractor will request a restart of the stream when a deserialization
+	//      error occurs. This is useful if the error is considered transient.
+	//      Stream restarts are performed with exponential backoff according to geist
+	//      config.
+	//      This is the default behavior if value is omitted.
+	//
+	//   "shutdownStream":
+	//      The stream will be shut down when a deserialization error occurs, requiring
+	//      an explicit external restart.
+	//
+	//   "discardMessage":
+	//      The message that failed deserialization is discarded and processing continues
+	//      with the next message.
+	//
+	// Note that standard geist retryable/unretryable error handling is not applied
+	// for deserialization errors when using this config. The reason is that the
+	// deserialization happens before the event is created and sent to downstream
+	// processing.
+	//
+	// Also note that if the extractor is configured to use a DLQ (ops.handlingOfUnretryableEvents
+	// set to "dlq"), normal event transformation and sink errors will still be covered
+	// by DLQ handling, but early deserialization errors will NOT be sent to the DLQ,
+	// but handled according to this config.
+	//
+	// This config only applies when using schema registry deserializers.
+	OnDeserializationError string `json:"onDeserializationError"`
+}
+
 // SourceConfig specifies the schema for the "customConfig" field in the "source" section
 // of the stream spec. It enables arbitrary connector specific fields to be present in
 // the stream spec. Any config provided in the stream spec will override the config provided
 // in the factory creation.
 type SourceConfig struct {
+	// SchemaRegistry is only required if the stream requires Schema Registry usage.
+	SchemaRegistryConfig *SchemaRegistryConfig `json:"schemaRegistry,omitempty"`
+
 	// Topics (required) specifies which topics to use.
 	Topics []Topics `json:"topics,omitempty"`
 
@@ -143,6 +193,9 @@ type DLQ struct {
 	// value of the injected stream ID for the current stream. That is, before the
 	// event is sent to the DLQ the stream ID is added to a new field created in the
 	// event, if this option is used.
+	//
+	// NOTE: This option requires that the event payload is JSON compatible, so it cannot
+	// be used together with binary formats such as Avro or Protobuf.
 	StreamIDEnrichmentPath string `json:"streamIDEnrichmentPath,omitempty"`
 }
 
@@ -151,6 +204,7 @@ type SinkTopic struct {
 	TopicSpec *TopicSpecification `json:"topicSpec,omitempty"`
 }
 
+// TopicSpecification specifies the topic details.
 // Name, NumPartitions and ReplicationFactor are required.
 // If sink topic is referring to an existing topic only Name will be used.
 // TODO: Remove when the Kafka connector has migrated to customConfig based config

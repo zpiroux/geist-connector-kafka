@@ -1,3 +1,4 @@
+// Package ikafka provides interfaces for Kafka clients used by the Kafka connector.
 package ikafka
 
 import (

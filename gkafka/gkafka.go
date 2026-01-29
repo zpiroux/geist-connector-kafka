@@ -1,12 +1,15 @@
+// Package gkafka provides the connector's external API and factory implementation.
 package gkafka
 
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/internal/gki"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
@@ -58,6 +61,21 @@ type Config struct {
 	// All these properties can be overridden in each Stream Spec by using its
 	// config.properties JSON object.
 	KafkaProps map[string]any
+
+	// SchemaRegistryClientConfig is the Schema Registry client config to use if the
+	// connector should enable GEIST streams using Schema Registry based flows.
+	//
+	// It is recommended to provide a schemaregistry.Config created with schemaregistry.NewConfig()
+	// to ensure all default values are properly set.
+	//
+	// If an existing schemaregistry.Client is to be used (only recommended for test
+	// scenarios) instead of creating a new one per extractor, it can be provided in
+	// the NewExtractorFactory method. In that case this config is not needed.
+	//
+	// Note that providing an existing client is only recommended if the client
+	// is known to be thread-safe (or for testing), since it will be shared by all extractor/loader
+	// instances created by the factory.
+	SchemaRegistryClientConfig *schemaregistry.Config
 
 	// PollTimeoutMs is the default value to use as the consumer poll timeout for
 	// each Extractor's Kafka consumer. It can be overridden per stream in stream
@@ -124,18 +142,21 @@ type extractorFactory struct {
 	cf     ikafka.ConsumerFactory
 	pf     ikafka.ProducerFactory
 	pfs    map[string]*gki.SharedProducerFactory
+	sr     schemaregistry.Client
 }
 
 // NewExtractorFactory creates a Geist source connector factory. cf and pf can normally
 // be set to nil to use the default internal ones, unless special setups are needed.
-func NewExtractorFactory(config *Config, cf ikafka.ConsumerFactory, pf ikafka.ProducerFactory) entity.ExtractorFactory {
+func NewExtractorFactory(config *Config, cf ikafka.ConsumerFactory, pf ikafka.ProducerFactory, sr schemaregistry.Client) entity.ExtractorFactory {
 	if gki.IsNil(pf) {
 		pf = &gki.DefaultProducerFactory{}
 	}
+
 	return &extractorFactory{
 		config: config,
 		cf:     cf,
 		pf:     pf,
+		sr:     sr,
 		pfs:    make(map[string]*gki.SharedProducerFactory),
 	}
 }
@@ -152,7 +173,29 @@ func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (
 		return nil, err
 	}
 
-	e, err := gki.NewExtractor(cfg, ef.cf)
+	var deserializer ikafka.Deserializer
+	// Currently we only support Avro with Schema Registry.
+	if cfg.UseSchemaRegistryWithAvro() {
+		srClient := ef.sr
+		var err error
+		if IsNil(srClient) {
+			// Create schema registry client if not provided in factory.
+			// Since there are no documented guarantees that the client is thread-safe,
+			// we create a new one per extractor instance. This should be fine performance-wise
+			// since the client has internal caching of schemas, and is not a heavy-weight object.
+			srClient, err = createSchemaRegistryClient(ef.config.SchemaRegistryClientConfig)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		deserializer, err = gki.NewAvroDeserializer(srClient)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	e, err := gki.NewExtractor(cfg, ef.cf, deserializer)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +207,16 @@ func (ef *extractorFactory) NewExtractor(ctx context.Context, c entity.Config) (
 		e.SetProducerFactory(ef.pfs[c.Spec.Id()])
 	}
 	return e, nil
+}
+
+func createSchemaRegistryClient(srConfig *schemaregistry.Config) (schemaregistry.Client, error) {
+	if srConfig == nil {
+		return nil, errors.New("no schema registry client config provided in factory config")
+	}
+	if srConfig.SchemaRegistryURL == "" {
+		return nil, errors.New("no schema registry URL provided in schema registry client config")
+	}
+	return schemaregistry.NewClient(srConfig)
 }
 
 func (ef *extractorFactory) createKafkaExtractorConfig(c entity.Config) (*gki.Config, error) {
@@ -234,6 +287,10 @@ func (ef *extractorFactory) createExtractorConfig(c entity.Config, sourceConfig 
 		ec.SetDLQConfig(dlqConfig)
 	}
 
+	if sourceConfig.SchemaRegistryConfig != nil {
+		ec.SetSchemaRegistryConfig(sourceConfig.SchemaRegistryConfig)
+	}
+
 	return ec, err
 }
 
@@ -267,7 +324,7 @@ func (ef *extractorFactory) topicNamesFromSpec(topicsInSpec []spec.Topics) []str
 	return topicNames
 }
 
-func (lf *extractorFactory) Close(ctx context.Context) error {
+func (ef *extractorFactory) Close(ctx context.Context) error {
 	return nil
 }
 
@@ -377,4 +434,8 @@ func topicSpecFromSpec(env string, topicsInSpec []spec.SinkTopic) *spec.TopicSpe
 
 func (lf *loaderFactory) Close(ctx context.Context) error {
 	return nil
+}
+
+func IsNil(v any) bool {
+	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil())
 }

@@ -2,9 +2,15 @@ package gkafka
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
+	"github.com/linkedin/goavro/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist"
@@ -61,7 +67,7 @@ func TestDLQE2E(t *testing.T) {
 
 	eventsToSimulate := int64(3)
 
-	consumerFactory := NewMockConsumerFactory(eventsToSimulate)
+	consumerFactory := NewMockConsumerFactory(eventsToSimulate, nil)
 	dlqProducerFactory := &MockDlqProducerFactory{}
 
 	ef := CreateExtractorFactory(kConfig, consumerFactory, dlqProducerFactory)
@@ -84,6 +90,10 @@ func TestDLQE2E(t *testing.T) {
 	err = geist.Run(ctx)
 	assert.NoError(t, err)
 
+	// Validate that the expected number of events were sent, and with correct content.
+	assert.Equal(t, int64(3), consumerFactory.consumer.eventsConsumed)
+	assert.Equal(t, []byte(`{"someField": "someData"}`), consumerFactory.consumer.lastEventConsumed.Value)
+
 	// Spec creation here is only needed to find out number of streams per pod
 	spec, err := entity.NewSpec(kafkaToVoidStreamDLQE2E)
 	require.NoError(t, err)
@@ -91,5 +101,248 @@ func TestDLQE2E(t *testing.T) {
 }
 
 func CreateExtractorFactory(config *Config, cf ikafka.ConsumerFactory, pf ikafka.ProducerFactory) entity.ExtractorFactory {
-	return NewExtractorFactory(config, cf, pf)
+	return NewExtractorFactory(config, cf, pf, nil)
+}
+
+// TestStreamExtractWithSchemaRegistryE2E performs an end-to-end test of a Geist stream
+// that extracts messages from a Kafka topic with Avro-encoded messages using
+// Confluent Schema Registry, deserializes them to JSON, processes them, and finally
+// forwards them to a custom sink loader for full data validation purposes.
+//
+// This test uses a mock Kafka client and Schema Registry instance injecting test messages
+// to validate the entire extraction and deserialization workflow.
+//
+// The stream spec used here requires the extractor to parse the consumed Avro messages
+// and produce returned geist transformed events with only a few selected fields.
+func TestStreamExtractWithSchemaRegistryE2E(t *testing.T) {
+
+	// The messages on the topic will have this format, shown here with its JSON representation,
+	// simulating events sent by a berry vending machine:
+	/*
+		{
+			"machine_info": {
+				"machine_id": "machine-123",
+				"location": "Some Building - Floor 3"
+			},
+			"user_info": {
+				"user_id": "user-456",
+				"membership_level": "silver"
+			},
+			"purchase_details": {
+				"berry_id": "berry-789",
+				"display_name": "Blueberry Pack",
+				"quantity": 5,
+				"price_per_item": 2.9,
+				"total_price": 14.5,
+				"timestamp": "2025-01-10T10:30:00Z"
+			}
+		}
+	*/
+	// The Avro schema for the messages is found in avroMessageSchemaForTesting() below.
+
+	// Set up a mock Schema Registry client that returns the above schema
+	// when requested with the appropriate schema ID.
+	srConfig := schemaregistry.NewConfig("mock://geist-test")
+	srClient, err := schemaregistry.NewClient(srConfig)
+	assert.NoError(t, err)
+	schemaInfo := schemaregistry.SchemaInfo{
+		Schema:     avroMessageSchemaForTesting(),
+		SchemaType: "avro",
+	}
+	schemaID, err := srClient.Register("some-subject", schemaInfo, false)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, schemaID)
+
+	// Set up a mock Kafka consumer that produces Avro-encoded messages
+	// in the Confluent wire format, including the magic byte and schema ID prefix.
+	eventsToSimulate := int64(1)
+	avroMessageToSend := createAvroEncodedMessageForTesting(t, schemaID)
+	cf := NewMockConsumerFactory(eventsToSimulate, avroMessageToSend)
+
+	// Create a Geist Kafka extractor factory with the prepared Schema Registry client
+	// and mock consumer factory.
+	ctx := context.Background()
+	geistConfig := geist.NewConfig()
+	geistConfig.Ops.Log = true
+	kConfig := &Config{
+		PollTimeoutMs: 250,
+		Env:           "staging",
+	}
+	ef := NewExtractorFactory(kConfig, cf, nil, srClient)
+	err = geistConfig.RegisterExtractorType(ef)
+	assert.NoError(t, err)
+
+	// Create a custom loader factory to capture processed events for validation.
+	loaderFactory := NewCustomLoaderFactory(ctx)
+	err = geistConfig.RegisterLoaderType(loaderFactory)
+	assert.NoError(t, err)
+
+	// Create a Geist instance with the full config
+	geist, err := geist.New(ctx, geistConfig)
+	assert.NoError(t, err)
+
+	// Register the stream spec defined in testdata/streamspec-schemaregistry-avro.json,
+	// run Geist and wait for processing to complete.
+	go func() {
+		streamId, err := geist.RegisterStream(ctx, createTestSpecBytes(t, "streamspec-schemaregistry-avro.json"))
+		assert.NoError(t, err)
+		assert.Equal(t, "geisttest-schema-registry-avro", streamId)
+		time.Sleep(5 * time.Second) // TODO: Change this to proper sync
+		err = geist.Shutdown(ctx)
+		assert.NoError(t, err)
+	}()
+
+	err = geist.Run(ctx)
+	assert.NoError(t, err)
+
+	// Validate that the expected number of events were sent, and with correct content.
+	assert.Equal(t, int64(1), cf.consumer.eventsConsumed)
+
+	// Validate that the messages were correctly deserialized to JSON
+	// and processed as expected.
+	lastLoadedEvents := loaderFactory.(*CustomLoaderFactory).Loader.lastLoadedEvents
+	assert.Equal(t, 1, len(lastLoadedEvents))
+	expectedEventData := map[string]any{
+		"machineIdRef":  "machine-123",
+		"userIdRef":     "user-456",
+		"berryIdRef":    "berry-789",
+		"quantityRef":   int64(5),
+		"totalPriceRef": 14.5,
+		"timestampRef":  "2025-01-10T10:30:00Z",
+	}
+	assert.Equal(t, expectedEventData, lastLoadedEvents[0].Data)
+}
+
+func createTestSpecBytes(t *testing.T, specFile string) []byte {
+	fileBytes, err := os.ReadFile("testdata/" + specFile)
+	assert.NoError(t, err)
+	return fileBytes
+}
+
+// avroMessageSchemaForTesting returns the Avro schema string for the test messages used
+// in TestStreamExtractWithSchemaRegistryE2E.
+func avroMessageSchemaForTesting() string {
+	return `{
+      "type": "record",
+      "name": "BerryPurchaseEvent",
+      "namespace": "geist.connector.kafka.test",
+      "fields": [
+        {
+          "name": "machine_info",
+          "type": {
+            "type": "record",
+            "name": "MachineInfo",
+            "fields": [
+              { "name": "machine_id", "type": "string" },
+              { "name": "location", "type": "string" }
+            ]
+          }
+        },
+        {
+          "name": "user_info",
+          "type": {
+            "type": "record",
+            "name": "UserInfo",
+            "fields": [
+              { "name": "user_id", "type": "string" },
+              { "name": "membership_level", "type": "string" }
+            ]
+          }
+        },
+        {
+          "name": "purchase_details",
+          "type": {
+            "type": "record",
+            "name": "PurchaseDetails",
+            "fields": [
+              { "name": "berry_id", "type": "string" },
+              { "name": "display_name", "type": "string" },
+              { "name": "quantity", "type": "int" },
+              { "name": "price_per_item", "type": "double" },
+              { "name": "total_price", "type": "double" },
+              { "name": "timestamp", "type": "string" }
+            ]
+          }
+        }
+      ]
+    }`
+}
+
+// createAvroEncodedMessageForTesting creates an Avro-encoded message in the Confluent
+// wire format that matches the schema defined above.
+func createAvroEncodedMessageForTesting(t *testing.T, schemaID int) []byte {
+	avroSchema := avroMessageSchemaForTesting()
+	codec, err := goavro.NewCodec(avroSchema)
+	assert.NoError(t, err)
+
+	// Create a native Go map that matches the schema
+	native := map[string]any{
+		"machine_info": map[string]any{
+			"machine_id": "machine-123",
+			"location":   "Some Building - Floor 3",
+		},
+		"user_info": map[string]any{
+			"user_id":          "user-456",
+			"membership_level": "silver",
+		},
+		"purchase_details": map[string]any{
+			"berry_id":       "berry-789",
+			"display_name":   "Blueberry Pack",
+			"quantity":       int32(5),
+			"price_per_item": float64(2.9),
+			"total_price":    float64(14.5),
+			"timestamp":      "2025-01-10T10:30:00Z",
+		},
+	}
+
+	// Serialize to Avro binary
+	avroBytes, err := codec.BinaryFromNative(nil, native)
+	assert.NoError(t, err)
+
+	// Confluent framing: magic byte (0) + 4 byte schema id (big endian) + avro payload
+	out := make([]byte, 1+4+len(avroBytes))
+	out[0] = 0
+	binary.BigEndian.PutUint32(out[1:5], uint32(schemaID))
+	copy(out[5:], avroBytes)
+	return out
+}
+
+// Custom Loader constructs for full extractor validation, via checking transformed output events.
+
+const CustomLoaderTypeID = "custom-loader-for-testing"
+
+func NewCustomLoaderFactory(ctx context.Context) entity.LoaderFactory {
+	return &CustomLoaderFactory{}
+}
+
+type CustomLoaderFactory struct {
+	Loader *CustomLoader
+}
+
+func (lf *CustomLoaderFactory) SinkId() string {
+	return CustomLoaderTypeID
+}
+
+func (lf *CustomLoaderFactory) NewLoader(ctx context.Context, c entity.Config) (entity.Loader, error) {
+	lf.Loader = &CustomLoader{}
+	return lf.Loader, nil
+}
+func (lf *CustomLoaderFactory) NewSinkExtractor(ctx context.Context, c entity.Config) (entity.Extractor, error) {
+	return nil, nil
+}
+func (lf *CustomLoaderFactory) Close(ctx context.Context) error {
+	return nil
+}
+
+type CustomLoader struct {
+	lastLoadedEvents []*entity.Transformed
+}
+
+func (l *CustomLoader) StreamLoad(ctx context.Context, data []*entity.Transformed) (string, error, bool) {
+	l.lastLoadedEvents = data
+	dataJSON, _ := json.MarshalIndent(data, "", "  ")
+	fmt.Printf("CustomLoader StreamLoad called with %d events: %s\n", len(data), string(dataJSON))
+	return "", nil, true
+}
+func (l *CustomLoader) Shutdown(ctx context.Context) {
 }

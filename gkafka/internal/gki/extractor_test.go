@@ -2,7 +2,9 @@ package gki
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +12,10 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry"
+	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry/serde"
+	"github.com/confluentinc/confluent-kafka-go/v2/schemaregistry/serde/avro"
+	"github.com/linkedin/goavro/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
@@ -76,6 +82,97 @@ func TestExtractor(t *testing.T) {
 	assert.Equal(t, "value2", (*(extractor.consumer.(*MockConsumer)).conf)["prop2"])
 	assert.Equal(t, "value3", (*(extractor.consumer.(*MockConsumer)).conf)["prop3"])
 	cancel()
+}
+
+func TestDeserialization(t *testing.T) {
+
+	const topicName = "some-topic"
+
+	// Set up Extractor entity
+	c := entity.Config{
+		Spec: createTestSpec(t, "streamspec-schemaregistry-avro.json"),
+	}
+	config := NewExtractorConfig(c, []string{"some-topic"}, nil)
+	config.SetSchemaRegistryConfig(&spec.SchemaRegistryConfig{
+		DataFormat: "avro",
+	})
+
+	srConfig := schemaregistry.NewConfig("mock://foo")
+	client, err := schemaregistry.NewClient(srConfig)
+	require.NoError(t, err)
+
+	// Register message schema with Schema Registry
+	schema := `{"type":"record","name":"TestRecord","fields":[{"name":"some_field1","type":"string"}]}`
+	subject := topicName // + "-value"
+	schemaInfo := schemaregistry.SchemaInfo{
+		Schema:     schema,
+		SchemaType: "avro",
+	}
+	_, err = client.Register(subject, schemaInfo, false)
+	require.NoError(t, err)
+
+	// Serialize a test message for deserialization validation
+	serializer, err := avro.NewGenericSerializer(client, serde.ValueSerde, avro.NewSerializerConfig())
+	require.NoError(t, err)
+	message := TestMessage{Field1: "some-field1-value"}
+	serializedValue, err := serializer.Serialize(subject, message)
+	require.NoError(t, err)
+	fmt.Printf("serialized value: %s", string(serializedValue))
+
+	// Create our goavro-based deserializer and preload codec for the schema id
+	// Extract schema id from serialized payload (confluent wire format)
+	schemaID := int(binary.BigEndian.Uint32(serializedValue[1:5]))
+	deserializerAny, err := NewAvroDeserializer(client)
+	require.NoError(t, err)
+	deserializer := deserializerAny
+	extractor, err := NewExtractor(config, nil, deserializer)
+	require.NoError(t, err)
+	require.True(t, extractor.useSchemaRegistry)
+
+	// Preload codec in the deserializer cache so it can decode the message
+	codec, err := goavro.NewCodec(schema)
+	require.NoError(t, err)
+	deserializer.codecCache[schemaID] = codec
+
+	// Validate deserialization
+	msg := createAvroKafkaMessage(topicName, serializedValue)
+	expectedDeserializedData := `{"some_field1":"some-field1-value"}`
+	event, err := extractor.newEntityEvent(msg)
+	require.NoError(t, err)
+
+	require.Equal(t, expectedDeserializedData, string(event.Data))
+}
+
+type TestMessage struct {
+	Field1 string `json:"some_field1"`
+}
+
+type MockAvroDeserializer struct {
+}
+
+func createAvroKafkaMessage(topic string, payload []byte) *kafka.Message {
+	return &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: ptrString(topic)},
+		Value:          payload,
+	}
+}
+
+var msgData []byte
+
+func MessageFactoryFunc(subject string, name string) (interface{}, error) {
+	return &msgData, nil
+}
+
+func ptrString(s string) *string {
+	return &s
+}
+
+func createTestSpec(t *testing.T, specFile string) *entity.Spec {
+	fileBytes, err := os.ReadFile("testdata/" + specFile)
+	require.NoError(t, err)
+	spec, err := entity.NewSpec(fileBytes)
+	require.NoError(t, err)
+	return spec
 }
 
 func TestRetryableFailure(t *testing.T) {
@@ -192,7 +289,7 @@ func TestMoveToDLQ(t *testing.T) {
 		StreamIDEnrichmentPath: "_myenrichment.streamId",
 	})
 	config.SetPollTimout(2000)
-	extractor, err := NewExtractor(config, cf)
+	extractor, err := NewExtractor(config, cf, nil)
 	assert.NoError(t, err)
 
 	msg := &kafka.Message{
@@ -279,7 +376,7 @@ func createMockExtractor(createTopics bool, dlqConfig *DLQConfig, spec *entity.S
 		config.SetDLQConfig(*dlqConfig)
 	}
 
-	extractor, err := NewExtractor(config, nil) // TODO: possibly remove Set... and add pf as param in call to New
+	extractor, err := NewExtractor(config, nil, nil) // TODO: possibly remove Set... and add pf as param in call to New
 	extractor.SetConsumerFactory(MockConsumerFactory{})
 	extractor.SetProducerFactory(MockDlqProducerFactory{})
 	return extractor, err

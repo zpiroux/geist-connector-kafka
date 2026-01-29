@@ -174,7 +174,7 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 		return actionShutdown, errors.New("invalid DLQ config, no DLQ topic name provided, shutting down stream")
 	}
 
-	mCopy := *m
+	mCopy := *m // TODO: Change to deep copy
 	mCopy.TopicPartition.Topic = &dlqTopic
 	mCopy.TopicPartition.Partition = kafka.PartitionAny
 	for i := 0; ; i++ {
@@ -188,7 +188,15 @@ func (e *Extractor) moveEventToDLQ(ctx context.Context, m *kafka.Message) (a act
 			}
 		}
 
-		if e.config.dlqConfig.StreamIDEnrichmentPath != "" {
+		// Enrich with stream ID if configured to do so. For now only supported for JSON.
+		// TODO: To support other formats, possibly add stream ID as header instead, such as:
+		//
+		//  mCopy.Headers = append(mCopy.Headers, kafka.Header{
+		//      Key:   "geist.stream.id",
+		//      Value: []byte(e.config.c.Spec.Id()),
+		//  })
+		//
+		if e.config.dlqConfig.StreamIDEnrichmentPath != "" && !e.config.UseSchemaRegistryWithAvro() {
 			mCopy.Value, err = e.enrichWithStreamID(mCopy.Value)
 			if err != nil {
 				e.notifier.Notify(entity.NotifyLevelError, "Failed to enrich event (%+v) on DLQ topic '%s' with err: %v", m, dlqTopic, err)

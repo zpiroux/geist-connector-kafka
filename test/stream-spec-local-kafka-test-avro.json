@@ -1,0 +1,84 @@
+{
+    "namespace": "geist-connector-kafka",
+    "streamIdSuffix": "test-stream",
+    "description": "Schema Registry/Avro test stream to consume events from a local Kafka topic and log them",
+    "version": 1,
+    "opsPerEnv": {
+        "local": {
+            "streamsPerPod": 1,
+            "microBatch": true,
+            "microBatchTimeoutMs": 3000
+        }
+    },
+    "source": {
+        "type": "kafka",
+        "config": {
+            "customConfig": {
+                "schemaRegistry": {
+                    "dataFormat": "avro",
+                    "onDeserializationError": "shutdownStream"
+                },
+                "topics": [
+                    {
+                        "env": "local",
+                        "names": [
+                            "test-topic"
+                        ]
+                    }
+                ],
+                "properties": [
+                    {
+                        "key": "group.id",
+                        "value": "geist-kafka-connector-test"
+                    }
+                ]
+            }
+        }
+    },
+    "transform": {
+        "extractFields": [
+            {
+                "fields": [
+                    {
+                        "id": "machineIdRef",
+                        "jsonPath": "machine_info.machine_id"
+                    },
+                    {
+                        "id": "userIdRef",
+                        "jsonPath": "user_info.user_id"
+                    },
+                    {
+                        "id": "berryIdRef",
+                        "jsonPath": "purchase_details.berry_id"
+                    },
+                    {
+                        "id": "quantityRef",
+                        "jsonPath": "purchase_details.quantity",
+                        "type": "int"
+                    },
+                    {
+                        "id": "totalPriceRef",
+                        "jsonPath": "purchase_details.total_price",
+                        "type": "float"
+                    },
+                    {
+                        "id": "timestampRef",
+                        "jsonPath": "purchase_details.timestamp",
+                        "type": "string"
+                    }
+                ]
+            }
+        ]
+    },
+    "sink": {
+        "type": "void",
+        "config": {
+            "properties": [
+                {
+                    "key": "logEventData",
+                    "value": "true"
+                }
+            ]
+        }
+    }
+}

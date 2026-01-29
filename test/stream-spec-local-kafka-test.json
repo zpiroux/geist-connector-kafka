@@ -1,0 +1,56 @@
+{
+    "namespace": "geist-connector-kafka",
+    "streamIdSuffix": "test-stream",
+    "description": "Test stream to consume events from a local Kafka topic and log them",
+    "version": 1,
+    "opsPerEnv": {
+        "local": {
+            "streamsPerPod": 1,
+            "microBatch": true,
+            "microBatchTimeoutMs": 3000
+        }
+    },
+    "source": {
+        "type": "kafka",
+        "config": {
+            "customConfig": {
+                "topics": [
+                    {
+                        "env": "local",
+                        "names": [
+                            "test-topic"
+                        ]
+                    }
+                ],
+                "properties": [
+                    {
+                        "key": "group.id",
+                        "value": "geist-kafka-connector-test"
+                    }
+                ]
+            }
+        }
+    },
+    "transform": {
+        "extractFields": [
+            {
+                "fields": [
+                    {
+                        "id": "rawEvent"
+                    }
+                ]
+            }
+        ]
+    },
+    "sink": {
+        "type": "void",
+        "config": {
+            "properties": [
+                {
+                    "key": "logEventData",
+                    "value": "true"
+                }
+            ]
+        }
+    }
+}
