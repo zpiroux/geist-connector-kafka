@@ -1,3 +1,4 @@
+// Package gki contains internal Kafka connector implementations.
 package gki
 
 import (
@@ -14,22 +15,23 @@ type ConfigMap map[string]any
 // from external Config with config from what is inside the stream spec for this
 // specific stream
 type Config struct {
-	c                   entity.Config
-	topics              []string                 // list of topics to consume from by Extractor
-	sinkTopic           *spec.TopicSpecification // topic to (create and) publish to by Loader
-	message             *spec.Message            // message spec
-	pollTimeoutMs       int                      // timeoutMs in Consumer Poll function
-	configMap           ConfigMap                // supports all possible Kafka consumer properties
-	topicCreationMutex  *sync.Mutex
-	synchronous         bool
-	createTopics        bool
-	sendToSourceEnabled bool
-	dlqConfig           DLQConfig
+	c                    entity.Config
+	topics               []string                 // list of topics to consume from by Extractor
+	sinkTopic            *spec.TopicSpecification // topic to (create and) publish to by Loader
+	message              *spec.Message            // message spec
+	pollTimeoutMs        int                      // timeoutMs in Consumer Poll function
+	configMap            ConfigMap                // supports all possible Kafka consumer properties
+	topicCreationMutex   *sync.Mutex
+	synchronous          bool
+	createTopics         bool
+	sendToSourceEnabled  bool
+	dlqConfig            DLQConfig
+	schemaRegistryConfig *spec.SchemaRegistryConfig
 }
 
 func (c *Config) String() string {
-	return fmt.Sprintf("topics: %v, pollTimeoutMs: %d, synchronous: %v, createTopics: %v, sendToSourceEnabled: %v props: %+v",
-		c.topics, c.pollTimeoutMs, c.synchronous, c.createTopics, c.sendToSourceEnabled, displayConfig(c.configMap))
+	return fmt.Sprintf("topics: %v, pollTimeoutMs: %d, synchronous: %v, createTopics: %v, sendToSourceEnabled: %v props: %+v, schemaRegistry: %+v",
+		c.topics, c.pollTimeoutMs, c.synchronous, c.createTopics, c.sendToSourceEnabled, displayConfig(c.configMap), c.schemaRegistryConfig)
 }
 
 func NewExtractorConfig(
@@ -95,6 +97,48 @@ func (c *Config) SetLoaderProps(props ConfigMap) {
 		}
 		c.configMap[k] = v
 	}
+}
+
+func (c *Config) UseSchemaRegistry() bool {
+	return c.schemaRegistryConfig != nil
+}
+
+func (c *Config) ValidateSchemaRegistryConfig() error {
+	if c.schemaRegistryConfig == nil {
+		return nil
+	}
+	if c.schemaRegistryConfig.DataFormat != "avro" {
+		return fmt.Errorf("unsupported schema registry data format: %s", c.schemaRegistryConfig.DataFormat)
+	}
+	if c.schemaRegistryConfig.OnDeserializationError != "" &&
+		c.schemaRegistryConfig.OnDeserializationError != spec.OnDeserErrorDiscardMessage &&
+		c.schemaRegistryConfig.OnDeserializationError != spec.OnDeserErrorShutdownStream &&
+		c.schemaRegistryConfig.OnDeserializationError != spec.OnDeserErrorRestartStream {
+		return fmt.Errorf("invalid schema registry onDeserializationError value: %s", c.schemaRegistryConfig.OnDeserializationError)
+	}
+	return nil
+}
+
+func (c *Config) OnDeserError() string {
+	if c.schemaRegistryConfig == nil {
+		return ""
+	}
+	return c.schemaRegistryConfig.OnDeserializationError
+}
+
+func (c *Config) UseSchemaRegistryWithAvro() bool {
+	if c.schemaRegistryConfig != nil {
+		return c.schemaRegistryConfig.DataFormat == "avro"
+	}
+	return false
+}
+
+func (c *Config) SchemaRegistryConfig() *spec.SchemaRegistryConfig {
+	return c.schemaRegistryConfig
+}
+
+func (c *Config) SetSchemaRegistryConfig(config *spec.SchemaRegistryConfig) {
+	c.schemaRegistryConfig = config
 }
 
 var commonConsumerProps = map[string]bool{

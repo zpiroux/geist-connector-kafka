@@ -1,0 +1,40 @@
+{
+    "namespace": "geisttest",
+    "streamIdSuffix": "schema-registry-avro",
+    "version": 1,
+    "description": "A test stream spec using the Schema Registry option",
+    "source": {
+        "type": "kafka",
+        "config": {
+            "customConfig": {
+                "schemaRegistry": {
+                    "dataFormat": "avro"
+                },
+                "topics": [
+                    {
+                        "env": "staging",
+                        "names": [
+                            "foo.events.staging"
+                        ]
+                    },
+                    {
+                        "env": "production",
+                        "names": [
+                            "foo.events.production"
+                        ]
+                    }
+                ],
+                "properties": [
+                    {
+                        "key": "group.id",
+                        "value": "geisttest-mock-5"
+                    }
+                ]
+            }
+        }
+    },
+    "transform": {},
+    "sink": {
+        "type": "void"
+    }
+}

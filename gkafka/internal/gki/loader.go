@@ -70,7 +70,7 @@ func NewLoader(ctx context.Context, config *Config, pf ikafka.ProducerFactory) (
 	if !l.config.synchronous {
 		ctxDRH, cancel := context.WithCancel(ctx)
 		if cancel == nil {
-			return l, fmt.Errorf(l.lgprfx() + "cancel func for deliveryReportHandler could not be created")
+			return l, fmt.Errorf("%s", l.lgprfx()+"cancel func for deliveryReportHandler could not be created")
 		}
 		l.shutdownDeliveryReportHandler = cancel
 		go l.deliveryReportHandler(ctx, ctxDRH)

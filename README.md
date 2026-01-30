@@ -3,10 +3,6 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/zpiroux/geist-connector-kafka)](https://goreportcard.com/report/github.com/zpiroux/geist-connector-kafka)
 [![Go Reference](https://pkg.go.dev/badge/github.com/zpiroux/geist-connector-kafka.svg)](https://pkg.go.dev/github.com/zpiroux/geist-connector-kafka)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=zpiroux_geist-connector-kafka&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=zpiroux_geist-connector-kafka)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=zpiroux_geist-connector-kafka&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=zpiroux_geist-connector-kafka)
-[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=zpiroux_geist-connector-kafka&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=zpiroux_geist-connector-kafka)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=zpiroux_geist-connector-kafka&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=zpiroux_geist-connector-kafka)
 
 </div>
 
@@ -64,6 +60,8 @@ Although the Kafka _Source_ entity (Extractor) exhibits high performance and gua
 There is an option in the Stream Spec to increase the sink throughput for a given stream (set `sink.config.synchronous` to `false`), but that could in rare cases lead to message loss, e.g. in case of Geist host crashing, so should only be used for non-critical streams.
 
 The underlying Kafka library ([librdkafka](https://github.com/edenhill/librdkafka)) did not have support for batch publish/delivery reports, that could improve this, when this connector was developed, but newer versions might have added this.
+
+Schema Registry and Avro support is currently only supported in the Kafka Source entity (extractor).
 
 
 ## Contact

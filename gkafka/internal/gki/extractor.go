@@ -2,6 +2,7 @@ package gki
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/teltech/logger"
+	"github.com/zpiroux/geist-connector-kafka/gkafka/spec"
 	"github.com/zpiroux/geist-connector-kafka/ikafka"
 	"github.com/zpiroux/geist/entity"
 	"github.com/zpiroux/geist/pkg/notify"
@@ -33,31 +35,38 @@ const (
 const DefaultPollTimeoutMs = 3000
 
 type Extractor struct {
-	cf              ikafka.ConsumerFactory
-	pf              ikafka.ProducerFactory
-	consumer        ikafka.Consumer
-	dlqProducer     ikafka.Producer
-	dlqDeliveryChan chan kafka.Event
-	sourceProducer  ikafka.Producer
-	config          *Config
-	ac              ikafka.AdminClient
-	notifier        *notify.Notifier
-	eventCount      int64
+	cf                ikafka.ConsumerFactory
+	pf                ikafka.ProducerFactory
+	consumer          ikafka.Consumer
+	dlqProducer       ikafka.Producer
+	useSchemaRegistry bool
+	deserializer      ikafka.Deserializer
+	dlqDeliveryChan   chan kafka.Event
+	sourceProducer    ikafka.Producer
+	config            *Config
+	ac                ikafka.AdminClient
+	notifier          *notify.Notifier
+	eventCount        int64
 }
 
-func NewExtractor(config *Config, cf ikafka.ConsumerFactory) (*Extractor, error) {
+func NewExtractor(config *Config, cf ikafka.ConsumerFactory, deserializer ikafka.Deserializer) (*Extractor, error) {
 
 	if IsNil(cf) {
 		cf = &DefaultConsumerFactory{}
 	}
 
 	e := &Extractor{
-		cf:     cf,
-		pf:     DefaultProducerFactory{},
-		config: config,
+		cf:                cf,
+		pf:                DefaultProducerFactory{},
+		useSchemaRegistry: config.UseSchemaRegistry() && !IsNil(deserializer),
+		deserializer:      deserializer,
+		config:            config,
 	}
 	if len(config.topics) == 0 {
 		return e, fmt.Errorf("no topics provided when creating Extractor: %+v", e)
+	}
+	if err := config.ValidateSchemaRegistryConfig(); err != nil {
+		return e, fmt.Errorf("invalid schema registry config when creating Extractor: %w", err)
 	}
 
 	// Ensure required consumer props are set correctly.
@@ -157,16 +166,25 @@ func (e *Extractor) StreamExtract(
 				}
 			}
 
+			// We keep track of all raw kafka messages in order to store the offsets
+			// when the microbatch completes.
 			msgs = append(msgs, evt)
 
 			if e.config.c.Spec.Ops.MicroBatch {
 
-				microBatchBytes += len(evt.Value)
-				events = append(events, entity.Event{
-					Key:  evt.Key,
-					Ts:   evt.Timestamp,
-					Data: evt.Value,
-				})
+				entityEvent, errEvt := e.newEntityEvent(evt)
+				if errEvt != nil {
+					errEvt, discardEvent := e.handleEntityEventCreationError(evt, errEvt, retryable)
+					if discardEvent {
+						continue
+					}
+					*err = errEvt
+					return
+				}
+
+				microBatchBytes += len(entityEvent.Data)
+				events = append(events, entityEvent)
+
 				if len(events) < e.config.c.Spec.Ops.MicroBatchSize &&
 					microBatchBytes < e.config.c.Spec.Ops.MicroBatchBytes &&
 					!microBatchTimedOut(microBatchStart, e.config.c.Spec.Ops.MicroBatchTimeoutMs) {
@@ -177,11 +195,16 @@ func (e *Extractor) StreamExtract(
 				}
 
 			} else {
-				events = []entity.Event{{
-					Key:  evt.Key,
-					Ts:   evt.Timestamp,
-					Data: evt.Value,
-				}}
+				entityEvent, errEvt := e.newEntityEvent(evt)
+				if errEvt != nil {
+					errEvt, discardEvent := e.handleEntityEventCreationError(evt, errEvt, retryable)
+					if discardEvent {
+						continue
+					}
+					*err = errEvt
+					return
+				}
+				events = []entity.Event{entityEvent}
 			}
 
 			switch e.handleEventProcessingResult(ctx, msgs, reportEvent(ctx, events), err, retryable) {
@@ -199,7 +222,7 @@ func (e *Extractor) StreamExtract(
 
 		case kafka.Error:
 			str := fmt.Sprintf("(%s) Kafka error in consumer, code: %v, event: %v", e.config.c.Spec.Id(), evt.Code(), evt)
-			e.notifier.Notify(entity.NotifyLevelWarn, str) // Most errors are recoverable
+			e.notifier.Notify(entity.NotifyLevelWarn, "%s", str) // Most errors are recoverable
 
 			// In case of all brokers down, terminate the Extractor and let Executor/Supervisor decide what to do.
 			if evt.Code() == kafka.ErrAllBrokersDown {
@@ -216,6 +239,57 @@ func (e *Extractor) StreamExtract(
 			}
 		}
 	}
+}
+
+// newEntityEvent creates an entity.Event from the given kafka.Message, performing
+// deserialization if schema registry is used.
+func (e *Extractor) newEntityEvent(evt *kafka.Message) (entity.Event, error) {
+	event := entity.Event{
+		Key:  evt.Key,
+		Ts:   evt.Timestamp,
+		Data: evt.Value,
+	}
+
+	if e.useSchemaRegistry {
+		if evt.TopicPartition.Topic == nil {
+			return event, fmt.Errorf("nil topic in kafka message: %+v", evt)
+		}
+
+		value, err := e.deserializer.Deserialize(*evt.TopicPartition.Topic, evt.Value)
+		if err != nil {
+			return event, fmt.Errorf("failed to deserialize payload: %w", err)
+		}
+
+		switch v := value.(type) {
+		case []byte:
+			event.Data = v
+		case string:
+			event.Data = []byte(v)
+		default:
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return event, fmt.Errorf("failed to marshal deserialized payload: %w", err)
+			}
+			event.Data = jsonBytes
+		}
+	}
+	return event, nil
+}
+
+func (e *Extractor) handleEntityEventCreationError(evt *kafka.Message, errEvt error, retryable *bool) (outError error, discardEvent bool) {
+	// Additional resilience handling for deserialization errors when using schema registry.
+	if e.useSchemaRegistry {
+		*retryable = true
+		switch e.config.OnDeserError() {
+		case spec.OnDeserErrorDiscardMessage:
+			e.notifier.Notify(entity.NotifyLevelError, "Deserialization error for event %+v: %v - discarding message as per schemaRegistry.onDeserializationError setting", evt, errEvt)
+			discardEvent = true
+		case spec.OnDeserErrorShutdownStream:
+			*retryable = false
+			return fmt.Errorf("deserialization error for event %+v: %v - shutting down stream as per schemaRegistry.onDeserializationError setting", evt, errEvt), false
+		}
+	}
+	return fmt.Errorf("newEntityEvent failed with: %w", errEvt), discardEvent
 }
 
 // handleEventProcessingResult processes the result from the downstream event processing
@@ -249,7 +323,7 @@ func (e *Extractor) handleEventProcessingResult(
 	case entity.ExecutorStatusError:
 		*retryable = false
 		if result.Retryable {
-			*err = fmt.Errorf(e.lgprfx() + "bug, executor should handle all retryable errors, until retries exhausted, shutting down Extractor")
+			*err = fmt.Errorf("%s", e.lgprfx()+"bug, executor should handle all retryable errors, until retries exhausted, shutting down Extractor")
 			return actionShutdown
 		}
 		str := e.lgprfx() + "executor had an unretryable error with this"

@@ -1,0 +1,77 @@
+{
+    "namespace": "geisttest",
+    "streamIdSuffix": "schema-registry-avro",
+    "version": 1,
+    "description": "A test stream spec using the Schema Registry option",
+    "ops": {
+        "logEventData": true
+    },
+    "source": {
+        "type": "kafka",
+        "config": {
+            "customConfig": {
+                "schemaRegistry": {
+                    "dataFormat": "avro"
+                },
+                "topics": [
+                    {
+                        "env": "staging",
+                        "names": [
+                            "foo.events.staging"
+                        ]
+                    },
+                    {
+                        "env": "production",
+                        "names": [
+                            "foo.events.production"
+                        ]
+                    }
+                ],
+                "properties": [
+                    {
+                        "key": "group.id",
+                        "value": "geisttest-mock-consumer-group"
+                    }
+                ]
+            }
+        }
+    },
+    "transform": {
+        "extractFields": [
+            {
+                "fields": [
+                    {
+                        "id": "machineIdRef",
+                        "jsonPath": "machine_info.machine_id"
+                    },
+                    {
+                        "id": "userIdRef",
+                        "jsonPath": "user_info.user_id"
+                    },
+                    {
+                        "id": "berryIdRef",
+                        "jsonPath": "purchase_details.berry_id"
+                    },
+                    {
+                        "id": "quantityRef",
+                        "jsonPath": "purchase_details.quantity",
+                        "type": "int"
+                    },
+                    {
+                        "id": "totalPriceRef",
+                        "jsonPath": "purchase_details.total_price",
+                        "type": "float"
+                    },
+                    {
+                        "id": "timestampRef",
+                        "jsonPath": "purchase_details.timestamp",
+                        "type": "string"
+                    }
+                ]
+            }
+        ]
+    },
+    "sink": {
+        "type": "custom-loader-for-testing"
+    }
+}

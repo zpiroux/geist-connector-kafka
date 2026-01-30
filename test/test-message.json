@@ -1,0 +1,18 @@
+{
+    "machine_info": {
+        "machine_id": "machine-123",
+        "location": "Some Building - Floor 3"
+    },
+    "user_info": {
+        "user_id": "user-456",
+        "membership_level": "silver"
+    },
+    "purchase_details": {
+        "berry_id": "berry-789",
+        "display_name": "Blueberry Pack",
+        "quantity": 5,
+        "price_per_item": 2.9,
+        "total_price": 14.5,
+        "timestamp": "2025-01-10T10:30:00Z"
+    }
+}
